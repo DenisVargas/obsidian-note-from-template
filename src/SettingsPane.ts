@@ -1,38 +1,18 @@
+import { PluginSettingTab, Setting } from 'obsidian';
+//Aviable: MarkdownView, Modal, normalizePath, Notice, Plugin, TextComponent, TFile, TFolder
+import { FT_Plugin } from "./main"
+import type { CreateType,  FT_PluginSettings,  ReplaceType } from './Shared';
 
-import { App, MarkdownView, Modal, normalizePath, Notice, Plugin, PluginSettingTab, Setting, TextComponent, TFile, TFolder } from 'obsidian';
-import FromTemplatePlugin from "./main"
-import  { CreateType,  ReplaceType, TemplateActionSettings } from './SharedInterfaces';
+export class FT_SettingTab extends PluginSettingTab {
+	plugin: FT_Plugin;
 
-export interface FromTemplatePluginSettings extends TemplateActionSettings {
-	templateDirectory: string;
-	inputSplit: string;
-	config: string;
-	inputSuggestions: boolean;
-}
-
-export const DEFAULT_SETTINGS: FromTemplatePluginSettings = {
-	outputDirectory:"test",
-	templateFilename:"{{title}}",
-	inputFieldList:"title,body",
-	textReplacementTemplates:["[[{{title}}]]"],
-	templateDirectory: 'templates',
-	replaceSelection: "always",
-	createOpen: "open-tab",
-	inputSplit: "\\s+-\\s+",
-	inputSuggestions: true,
-	config: '[]'
-}
-
-export class FromTemplateSettingTab extends PluginSettingTab {
-	plugin: FromTemplatePlugin;
-
-	constructor(app: App, plugin: FromTemplatePlugin) {
-		super(app, plugin);
+	constructor( plugin: FT_Plugin ) {
+		super(plugin.app, plugin);
 		this.plugin = plugin;
 	}
 
 	getDirectoryText(folder:string) : [string,string,string] {
-		const numFolders = this.plugin.templates.countTemplates(folder)
+		const numFolders = this.plugin.processor?.countTemplates(folder)
 		if( numFolders === undefined ) {
 			return [`⚠️ Directory to read templates from. '${folder}' does not exist`,'from-template-error-text','from-template-ok-text']
 		}
@@ -41,11 +21,12 @@ export class FromTemplateSettingTab extends PluginSettingTab {
 		}
 	}
 
-	display(): void {
-		let {containerEl} = this;
+	async display(): Promise<void> {
+		const {containerEl} = this;
+		const pluginSettings: FT_PluginSettings = await this.plugin.loadSettings();
+		const processor = this.plugin.processor;
 
 		containerEl.empty();
-
 		containerEl.createEl('h2', {text: 'Note From Template Settings'});
 
 		const dirSetting = new Setting(containerEl)
@@ -55,31 +36,34 @@ export class FromTemplateSettingTab extends PluginSettingTab {
 		// Finding the right template folder
 		const updateFolderDescription = (folder:string) => {
 			try {
-			let [text,clss,r_clss] = this.getDirectoryText(folder)
-			dirSetting.descEl.addClass(clss)
-			dirSetting.descEl.removeClass(r_clss)
+				const [text,clss,r_clss] = this.getDirectoryText(folder)
+				dirSetting.descEl.addClass(clss)
+				dirSetting.descEl.removeClass(r_clss)
 			} catch (error) {
-
+				console.error(error)
 			}
 		}
 
-		const folders = this.plugin.templates.getTemplateFolders()
-		const opts : Record<string,string> = {}
-		folders.forEach(f => opts[f.location.path] =
-			("-".repeat(f.depth-1) + ` ${f.location.name} (${f.numTemplates})` )
-		)
-		dirSetting.addDropdown(text => text
-			//.setPlaceholder('templates')
-			.addOptions(opts)
-			.setValue(this.plugin.settings.templateDirectory)
-			.onChange(async (value) => {
-				this.plugin.settings.templateDirectory = value;
-				updateFolderDescription(value)
-				await this.plugin.indexTemplates()
-				await this.plugin.saveSettings();
-			}));
-		
-		updateFolderDescription(this.plugin.settings.templateDirectory)
+		if(processor && this.plugin){
+			const folders = processor.getTemplateFolders()
+	
+			const opts : Record<string,string> = {}
+			folders.forEach(f => opts[f.location.path] =
+				("-".repeat(f.depth-1) + ` ${f.location.name} (${f.numTemplates})` )
+			)
+			dirSetting.addDropdown(text => text
+				//.setPlaceholder('templates')
+				.addOptions(opts)
+				.setValue(pluginSettings.templateDirectory)
+				.onChange(async (value) => {
+					pluginSettings.templateDirectory = value;
+					updateFolderDescription(value)
+					await this.plugin.indexTemplates();
+					await this.plugin.saveSettings();
+				}));
+			
+			updateFolderDescription(pluginSettings.templateDirectory)
+		}
 
 
 		new Setting(containerEl)
@@ -89,11 +73,12 @@ export class FromTemplateSettingTab extends PluginSettingTab {
 				.addOption("always","Always")
 				.addOption("sometimes","If Selected")
 				.addOption("never","Never")
-				.setValue(this.plugin.settings.replaceSelection)
+				.setValue(pluginSettings.replaceSelection)
 				.onChange(async (value) => {
-					this.plugin.settings.replaceSelection = value as ReplaceType;
+					pluginSettings.replaceSelection = value as ReplaceType;
 					await this.plugin.saveSettings();
 				}));
+
 		new Setting(containerEl)
 		.setName('Create and Open Note')
 		.setDesc('Should a note be created and opened? If opened, in a pane?')
@@ -103,18 +88,18 @@ export class FromTemplateSettingTab extends PluginSettingTab {
 			.addOption("open","Create and open in this pane")
 			.addOption("open-pane","Create and open in new pane")
 			.addOption("open-tab","Create and open in new tab")
-			.setValue(this.plugin.settings.createOpen)
+			.setValue(pluginSettings.createOpen)
 			.onChange(async (value) => {
-				this.plugin.settings.createOpen = value as CreateType;
+				pluginSettings.createOpen = value as CreateType;
 				await this.plugin.saveSettings();
 			}));
 		new Setting(containerEl)
 		.setName('Default output directory')
-		.setDesc('Where to put notes if they have not specified with {{template-output}}')
+		.setDesc('Where to put notes if they have not specified with {{template-output}}, Default value is "/" (Your Vault\'s root)')
 		.addText(text => text
-			.setValue(this.plugin.settings.outputDirectory)
-			.onChange(async (value) => {
-				this.plugin.settings.outputDirectory = value;
+			.setValue(pluginSettings.outputDirectory)
+			.onChange(async (value:string) => {
+				pluginSettings.outputDirectory = value;
 				await this.plugin.saveSettings();
 			}));
 		new Setting(containerEl)
@@ -122,27 +107,27 @@ export class FromTemplateSettingTab extends PluginSettingTab {
 		.setDesc('What to call notes if they have not specified {{template-filename}}')
 		.addText(text => text
 			.setPlaceholder("{{title}}")
-			.setValue(this.plugin.settings.templateFilename)
+			.setValue(pluginSettings.templateFilename)
 			.onChange(async (value) => {
-				this.plugin.settings.templateFilename = value;
+				pluginSettings.templateFilename = value;
 				await this.plugin.saveSettings();
 			}));
 		new Setting(containerEl)
 		.setName('Default replacement string')
 		.setDesc('What replacement string to use if the template has not specified using {{template-replacement}}')
 		.addText(text => text
-			.setValue(this.plugin.settings.textReplacementTemplates[0])
+			.setValue(pluginSettings.textReplacementTemplates[0])
 			.onChange(async (value) => {
-				this.plugin.settings.textReplacementTemplates[0] = value;
+				pluginSettings.textReplacementTemplates[0] = value;
 				await this.plugin.saveSettings();
 			}));
 		new Setting(containerEl)
 		.setName('Default field list')
 		.setDesc('What fields to expect if they template does not specify with {{template-input}}')
 		.addText(text => text
-			.setValue(this.plugin.settings.inputFieldList)
+			.setValue(pluginSettings.inputFieldList)
 			.onChange(async (value) => {
-				this.plugin.settings.inputFieldList = value;
+				pluginSettings.inputFieldList = value;
 				await this.plugin.saveSettings();
 			}));
 
@@ -150,18 +135,18 @@ export class FromTemplateSettingTab extends PluginSettingTab {
 			.setName('Selection split')
 			.setDesc('A regex to split up the input selection to fill in extra fields in the note creation box. Should default to "\\s+-\\s+"')
 			.addText(text => text
-				.setValue(this.plugin.settings.inputSplit)
+				.setValue(pluginSettings.inputSplit)
 				.onChange(async (value) => {
-					this.plugin.settings.inputSplit = value;
+					pluginSettings.inputSplit = value;
 					await this.plugin.saveSettings();
 				}));
 		new Setting(containerEl)
 			.setName('Input Suggestions')
 			.setDesc('Add suggestion support to text boxes. Will add suggestions for links when typing [[, and for tags for a field called "tags"')
 			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.inputSuggestions)
+				.setValue(pluginSettings.inputSuggestions)
 				.onChange(async (value) => {
-					this.plugin.settings.inputSuggestions = value;
+					pluginSettings.inputSuggestions = value;
 					await this.plugin.saveSettings();
 				}));
 	}

@@ -1,116 +1,188 @@
-import {  Editor,  MarkdownView,    Plugin, TFolder,  WorkspaceLeaf} from 'obsidian';
-import { TemplateInputUI} from './TemplateInputUI';
-import { FromTemplateSettingTab, FromTemplatePluginSettings, DEFAULT_SETTINGS } from './SettingsPane';
-import TemplateProcessing from './TemplateProcessing';
-import {    TemplateIdentifier, ReplacementOptions, TemplateResult, FolderOK } from './SharedInterfaces';
-import { FolderCreateUI} from './UISupport';
+import { Plugin, App, MarkdownView, TFolder, type Editor, type PluginManifest, type TFile, type WorkspaceLeaf} from 'obsidian';
+import { TemplateInputModal} from './TemplateInputUI';
+import { FT_SettingTab } from './SettingsPane';
+import { TemplateProcessor } from './TemplateProcessing';
+import type { FT_PluginSettings, TemplateMetadata, ReplacementOptions, TemplateResult } from './Shared';
+import { FolderCreateModal } from './UISupport';
 
-export default class FromTemplatePlugin extends Plugin {
-	settings: FromTemplatePluginSettings;
-	templates: TemplateProcessing
-	addedCommands: string[] = []
-	//templateDir: string = "templates"
+export class FT_Plugin extends Plugin {
+	
+	/**
+	 * Plugin settings loaded from Obsidian's data store.
+	 * Undefined until {@link loadSettings} is called during plugin initialization.
+	 */
+	settings: FT_PluginSettings | undefined;
+	/**
+	 * Template processor responsible for managing and preparing templates.
+	 * Initialized during plugin load with the vault instance.
+	 * Undefined until {@link onload} is called.
+	*/
+	processor: TemplateProcessor | undefined;
+	settingsTab: FT_SettingTab; //UI
+	folderCreateModal: FolderCreateModal;
+	templateInputModal: TemplateInputModal;
+	addedCommands: string[];
+	
+	private _reIndexTemplatesCallback: () => void;
+
+	constructor(app: App, manifest: PluginManifest) {
+		super(app, manifest);
+		console.log(`Root is ${this.app.vault.getRoot()}`)
+		this.addedCommands = [];
+		this.processor = new TemplateProcessor(this);
+		this.settingsTab = new FT_SettingTab(this);
+
+		/* ------------------------------- Obsidian UI ------------------------------ */
+		
+		this.folderCreateModal = new FolderCreateModal(this);
+		this.templateInputModal = new TemplateInputModal(this);
+		
+		/* -------------------------- Re-Indexing Callback -------------------------- */
+		this._reIndexTemplatesCallback = () => {
+			this.indexTemplates()
+			console.log("Reloaded Templates!")
+		};
+	}
 
 	async onload() {
-		await this.loadSettings();
-		this.addSettingTab(new FromTemplateSettingTab(this.app, this));
-		this.templates = new TemplateProcessing(this.app.vault)
-		this.app.workspace.onLayoutReady(() => this.indexTemplates());
-		this.addCommand({id:"reload",name:"Re-index Templates",callback: async () => this.indexTemplates()})
-		console.log("Reloaded Templates!")
+		this.settings = await this.loadSettings(); //Explict load settings from disk
+		this.addSettingTab(this.settingsTab);
+		
+		this.processor?.loadFromDefaultLocation();
+
+		this.addCommand({id:"reload",name:"Re-index Templates",callback: this._reIndexTemplatesCallback})
+		this.app.workspace.onLayoutReady(this._reIndexTemplatesCallback);
+	}
+
+	async onunload() {
+		this.removeCommand("reload");
+		this.processor?.cleanCache();
+		console.log('unloading plugin');
 	}
 
 	// Adds all the template commands - calls getTemplates which looks for files in the settings.templateDirectory
 	async indexTemplates() {
-		this.clearTemplateCommands()
-		const templates = await this.templates.getTemplateIdentifiersFromDirectory(this.settings.templateDirectory) || []
-		console.log("Got templates: ",templates.map(c => c.path).join(", "))
-		templates.forEach(async t => {
-			if( t ) {
-				const ts = (await t) as TemplateIdentifier
-				const command = this.addCommand( {
-					id:ts.id,
-					name: ts.name,
-					//editorCallback: async (editor, view ) => { this.launchTemplate(editor,view,ts) },
-					// Switched - using callback: lets it be called from anywhere, but we have to guess at the editor/view
-					callback: async () => { this.launchTemplate(undefined,undefined,ts) }
-					
-				});
-				this.addedCommands.push( command.id )
+		const processor = this.processor;
+
+		if(processor){
+			const loadResult = await processor.loadFromDefaultLocation()
+			if (!loadResult.ok) {
+				console.error(loadResult.error.message)
+				return
 			}
+			console.log("Got templates: ", Object.values(loadResult.value).map(entry => entry.meta.path).join(", "))
+		}
+		console.info("Reloaded Templates!");
+	}
+
+	//This might be unnecesary, as of v1.4.4, aparently using when onunload() is called commands associated to this plugin are garbage collected.
+	//https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines#Clean+up+resources+when+plugin+unloads
+	clearTemplateCommands() {
+		//From https://liamca.in/Obsidian/API+FAQ/commands/unload+a+Command
+		//Use this.removeCommand() instead
+		this.addedCommands.forEach(cid => {
+			this.removeCommand(cid)
 		})
 	}
 
+	/**
+	 * Loads the selected template, gathers context from the active editor or view,
+	 * and opens the input modal used to resolve template variables.
+	 * @param templateId - The template identifier for the template being launched.
+	 * @returns A promise that resolves once the template has been prepared and the modal opened.
+	 */
+	async launchTemplate( templateId: TemplateMetadata ) : Promise<void> {
+		
+		const view: MarkdownView | null = this.app.workspace.getActiveViewOfType(MarkdownView)
+		
+		if(view && this.processor && this.settings){
+			const editor: Editor|undefined = view.editor;
+			const initial_selection = this.getCurrentSelection( editor );
 
+			//El flujo actual es invocar el inputModal para modificar el input que se le suministra al template.
+			//Luego ejecuar el template.
+			//Finalmente renderizar el resultado (escribir en disco donde corresponda).
 
-	clearTemplateCommands() {
-		//From https://liamca.in/Obsidian/API+FAQ/commands/unload+a+Command
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		this.addedCommands.forEach(cid => {
-			try {
-				(this.app as any).commands.removeCommand(cid)
-			} catch(error) {
-				console.log("Could not remove command: ",error)
-			}
-		} )
-	}
-
-	async launchTemplate(editor:(Editor|undefined),view:MarkdownView|undefined, ts:TemplateIdentifier) {
-		// Updated to deal with the idea we might not have a view/editor
-		if( ! view ) view = this.app.workspace.getActiveViewOfType(MarkdownView)
-		if( (! editor) && view ) editor = view.editor
-
-		const initial_selection = this.getCurrentSelection( editor )
-		// Get the template text and the fields to fill in
-		const template = await this.templates.prepareTemplate(
-			ts,this.settings,initial_selection,this.settings.inputSplit)
-
-		// Can we fill in extra information here?
-		if( view ) {
-			template.data['currentTitle'] = view.file.basename
-			template.data['currentPath'] = view.file.path
-		}
-
-		const options:ReplacementOptions = {
-			editor:editor,
-			shouldReplaceSelection:editor ? template.template.replaceSelection : "never",
-			shouldCreateOpen:template.template.createOpen,
-			willReplaceSelection:editor ? true : false,
-		}
-		//This class does all the UI work
-		new TemplateInputUI(this.app,this,template,options).open();
-	}
-
+			// prepareTemplate is deprecated.
+			// Get the template text and the fields to fill in
+			// const templateResult = await this.processor.prepareTemplate(
+			// 	templateId,
+			// 	this.settings,
+			// 	initial_selection,
+			// 	this.settings.inputSplit
+			// )
+			// if (!templateResult.ok) {
+			// 	console.error(templateResult.error.message)
+			// 	return
+			// }
+			// const template = templateResult.value
 	
-	// Writes the template to file, does any replacement needed in the active file, opens new file if needed
-	// Current structure of returning null on success and a string on failure is rather ugly
-	async writeTemplate(result:TemplateResult, options:ReplacementOptions) : Promise<void|string> {
+			// Can we fill in extra information here?
+			// if( view && view.file) {
+			// 	template.data['currentTitle'] = view.file.basename
+			// 	template.data['currentPath'] = view.file.path
+			// }
+	
+			// const options:ReplacementOptions = {
+			// 	editor:editor,
+			// 	shouldReplaceSelection:editor ? template.template.replaceSelection : "never",
+			// 	shouldCreateOpen:template.template.createOpen,
+			// 	willReplaceSelection:editor ? true : false,
+			// }
+			
+			// this.templateInputModal.openWith(template, options);
+		}
+	}
+	
+	/**
+	 * Writes a filled-out template to the vault, optionally replaces the active editor selection,
+	 * and opens the newly created file according to the provided options.
+	 *
+	 * Returns a discriminated result object — never throws for expected IO failures.
+	 * - `{ ok: true, fileCreated, filePath?, replacedSelection, openedFile }` on success.
+	 * - `{ ok: false, code, message, cause? }` when file creation or file opening fails.
+	 *   `code` is `"CREATE_FILE_FAILED"` or `"OPEN_FILE_FAILED"`.
+	 *
+	 * Unexpected errors (e.g. programming bugs) are still thrown and should be caught by the caller.
+	 *
+	 * @param result - The filled-out template data: note content, filename, folder and replacement text.
+	 * @param options - Controls whether to create a file, replace the selection, and how to open the file.
+	 * @returns A discriminated union — check `ok` before accessing success or error fields.
+	 */
+	async writeTemplate(result:TemplateResult, options:ReplacementOptions) : Promise<
+		| { ok: true;  fileCreated: boolean; filePath?: string; replacedSelection: boolean; openedFile: boolean }
+		| { ok: false; code: "CREATE_FILE_FAILED" | "OPEN_FILE_FAILED"; message: string; cause?: unknown }
+	> {
 		const vault = this.app.vault
+
 		// First try to make the file
 		console.debug("Making file")
-		let newFile = null
-		let fileOK = true // Will be false if file creation failed, true if it succeded or was not requested
+		let newFile: TFile | null = null
+		let openedFile = false
 		if( options.shouldCreateOpen !== "none" ) {
 			try {
-				fileOK = false
 				await this.createFolderIfNeeded(result.folder)
 				const fullPath = result.folder + "/" + result.filename + ".md"
 				newFile = await vault.create(fullPath, result.note)
-				fileOK = true
 			} catch (error) {
                 console.debug("Error writing template",error)
-				return("Couldn't create file '" + result.filename + "': " + error.toString() )
+				return {
+					ok: false,
+					code: "CREATE_FILE_FAILED",
+					message: `Couldn't create file '${result.filename}': ${error instanceof Error ? error.message : String(error)}`,
+					cause: error,
+				}
 			}
 		}
 
 		// Then see if we replace text in the editor
-		if( options.willReplaceSelection && fileOK ) 
+		if( options.willReplaceSelection ) 
 			this.replaceCurrentSelection(result.replacementText,options.editor)
 
 		// Then see if we should open the new file
 		if( newFile) {
 			console.debug("Opening")
-			let leaf:WorkspaceLeaf = undefined
+			let leaf:WorkspaceLeaf | null = null
 			if( options.shouldCreateOpen === "open" ) 
 				leaf = this.app.workspace.getLeaf(false)
 			else if( options.shouldCreateOpen === "open-pane" ) 
@@ -118,65 +190,65 @@ export default class FromTemplatePlugin extends Plugin {
 			else if( options.shouldCreateOpen === "open-tab" ) 
 				leaf = this.app.workspace.getLeaf("tab")
 			if( leaf ) {
-				leaf.openFile(newFile)
+				try {
+					await leaf.openFile(newFile)
+					openedFile = true
+				} catch (error) {
+					console.debug("Error opening created file",error)
+					return {
+						ok: false,
+						code: "OPEN_FILE_FAILED",
+						message: "Created file '" + result.filename + "' but couldn't open it.",
+						cause: error,
+					}
+				}
 			}
+		}
+
+		return {
+			ok: true,
+			fileCreated:newFile !== null,
+			filePath:newFile?.path,
+			replacedSelection:options.willReplaceSelection,
+			openedFile:openedFile,
 		}
 	}
 
-	/*
-	 * Checks if a given path exists as a folder
+	/**
+	 * Checks whether the provided vault path currently resolves to an existing folder.
+	 *
+	 * This method only validates existence and type (`TFolder`) at the exact path.
+	 * It does not create folders, normalize paths, or validate intermediate segments.
+	 *
+	 * @param folder - Vault-relative folder path to validate.
+	 * @returns `true` when the path exists and is a folder; otherwise `false`.
 	 */
-	checkIfFolderExists(folder:string) : FolderOK {
-		const vault = this.app.vault
-		const curFolder = vault.getAbstractFileByPath(folder)
-		if( curFolder && (curFolder instanceof TFolder)) {
-			return {ok:true,good:[],bad:[],path:folder}
-		}
-		const bits = folder.split("/")
-		console.debug("Folder does not exist - checking parents",bits)
-		var currentPath = ""
-		var good = []
-		var bad = [...bits]
-		for (const b in bits ) {
-			currentPath += (currentPath.length ? "/" : "") + bits[b]
-			const f = vault.getAbstractFileByPath(currentPath)
-			if( f && (f instanceof TFolder)) {
-				good.push(bad.shift())
-			}
-			else {
-				break;
-			}
-		}
-		return {ok:false, good:good, bad:bad,path:folder}
+	checkIfFolderExists(folder:string): boolean {
+		return this.app.vault.getAbstractFileByPath(folder) instanceof TFolder
 	}
 
-	async createFolderIfNeeded(folder:string) {
-		const ok = this.checkIfFolderExists(folder)
-		if( ok['ok']) return;
-		var doneFunc
-		const p:Promise<null> = new Promise((resolve,reject)=>{
-			doneFunc=resolve
-		})
-		const ui = new FolderCreateUI(this.app,ok,doneFunc)
-		ui.open()
-		await p;
+	async createFolderIfNeeded(folder: string) {
+		if (this.checkIfFolderExists(folder)) return
+		
+		if (!await this.folderCreateModal.createDirectory(folder))
+			throw new Error("Folder creation cancelled by user")
 	}
 
-	getCurrentSelection(editor?:Editor) {
+	getCurrentSelection(editor?:Editor): string {
 		if( editor ) return editor.getSelection();
-		const t = window.getSelection().toString()
-		console.log("Got no Editor, getting from window: ",t)
-		return t
+		const selection = window.getSelection()
+		if(!selection) return ""
+		// console.log("Got no Editor, getting from window: ",selection)
+		return selection.toString()
 	}
 
-	replaceCurrentSelection(repl:string,editor?:Editor) {
+	replaceCurrentSelection(repl:string, editor?:Editor) {
 		if(editor) {
-			console.log("Got Editor" )
-			editor.replaceRange(repl,
-				editor.getCursor("from"), editor.getCursor("to"));
+			console.log("Got Editor")
+			editor.replaceRange(repl, editor.getCursor("from"), editor.getCursor("to"));
 		}
 		else {
-			console.log("Got no Editor, putting text on clipboard: ",repl)
+			console.log("Got no Editor, putting text on clipboard: ", repl)
 			navigator.clipboard.writeText(repl)
 			// https://developer.mozilla.org/en-US/docs/Web/API/Selection
 			//const sel = window.getSelection()
@@ -184,22 +256,36 @@ export default class FromTemplatePlugin extends Plugin {
 			//if( sel.anchorNode === sel.focusNode ) {
 		}
 	}
-
 	
-
-	onunload() {
-		console.log('unloading plugin');
-	}
-
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+	/**
+	 * Loads plugin settings from Obsidian's persisted plugin data and merges them
+	 * with the default configuration.
+	 *
+	 * This method is intentionally side-effect free with respect to plugin setup:
+	 * it only reads stored data and returns a fully populated settings object.
+	 * Because of that, it can also be reused by external classes or helper
+	 * functions that need access to the resolved settings without depending on
+	 * the plugin object {@link FT_Plugin.settings}.
+	 *
+	 * @returns The resolved plugin settings, combining persisted values with defaults.
+	 */
+	async loadSettings(): Promise<FT_PluginSettings> {
+		const DEFAULT_SETTINGS: FT_PluginSettings = {
+			outputDirectory:"",
+			templateFilename:"{{title}}",
+			inputFieldList:"title,body",
+			textReplacementTemplates:["[[{{title}}]]"],
+			templateDirectory: 'templates',
+			replaceSelection: "always",
+			createOpen: "open-tab",
+			inputSplit: "\\s+-\\s+",
+			inputSuggestions: true,
+			config: '[]'
+		}
+		return await Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
-
 }
-
-
-

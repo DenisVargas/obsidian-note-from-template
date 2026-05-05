@@ -1,54 +1,74 @@
-import { AbstractInputSuggest, App, FuzzySuggestModal, Modal, SearchResult, TFile, TextComponent, fuzzySearch, prepareFuzzySearch } from "obsidian";
-import { FolderOK } from "./SharedInterfaces";
+import { AbstractInputSuggest, type App, FuzzySuggestModal, Modal, type SearchResult, TFile, TextComponent, prepareFuzzySearch } from "obsidian";
+import { FT_Plugin } from "./main";
 
+export class FolderCreateModal extends Modal {
+    private folderPath:string | null = null
+    private resolveFn:((created:boolean)=>void) | null = null
+    private rejectFn:((reason?:unknown)=>void) | null = null
 
-export class FolderCreateUI extends Modal {
-    input:FolderOK
-    func:()=>void;
-    constructor(app:App,input:FolderOK,func:()=>void) {
-        super(app)
-        this.input = input
-        this.func = func
+    constructor( plugin: FT_Plugin ) {
+        super(plugin.app)
     }
-	async onOpen() {
-		let {contentEl} = this;
+
+    createDirectory(folderPath:string): Promise<boolean> {
+        return new Promise<boolean>((resolve, reject) => {
+            this.folderPath = folderPath
+            this.resolveFn = resolve
+            this.rejectFn = reject
+            this.open()
+        })
+    }
+
+    private settle(result:boolean, error?:unknown) {
+        const resolve = this.resolveFn
+        const reject = this.rejectFn
+        this.resolveFn = null
+        this.rejectFn = null
+        this.folderPath = null
+        if (error) {
+            reject?.(error)
+            return
+        }
+        resolve?.(result)
+    }
+	
+    async onOpen() {
+		if (!this.folderPath) return
+		const {contentEl} = this;
+        contentEl.empty()
         //this.modalEl.addClass("from-template-modal")
     		//And a submit button
         const folder_to_create = 
-		contentEl.createEl('h4', { text: "Missing parent folder for note"});
-        contentEl.createEl('div',{text: this.input.path,cls:"from-template-error-text"})
-        contentEl.createEl('hr')
-        const folDiv = contentEl.createDiv()
-        folDiv.createEl('div',{text: "The following paths are missing: "})
-        const pDiv = folDiv.createEl('div',{cls:"from-template-folder-container"})
-        const goodDiv = pDiv.createEl('span',{cls:"from-template-folder-OK"})
-        for( const g in this.input.good ) {
-            goodDiv.createEl('span',{text: "✅ "+this.input.good[g],cls:"from-template-ok-text"})
-            goodDiv.createEl('span',{text: " / "})
-        }
-        const badDiv = pDiv.createEl('span',{cls:"from-template-folder-bad"})
-        for( const b in this.input.bad ) {
-            badDiv.createEl('span',{text: "⚠️ "+this.input.bad[b],cls:"from-template-error-text"})
-            badDiv.createEl('span',{text: " / "})
-        }
+            contentEl.createEl('h4', { text: "Missing parent folder for note"});
+            contentEl.createEl('div',{text: this.folderPath,cls:"from-template-error-text"})
+            contentEl.createEl('hr')
+        contentEl.createEl('div',{text: "This folder does not exist. Do you want to create it now?"})
         contentEl.createEl('hr')
 		const submits = contentEl.createDiv()
-        const createFolder = () => {
-            this.app.vault.createFolder(this.input.path)
+        const createFolder = async () => {
+            try {
+                await this.app.vault.createFolder(this.folderPath!)
+                this.settle(true)
+            } catch (error) {
+                this.settle(false, error)
+            }
             this.close()
-            this.func()
         }
         const notCreateFolder = () => {
+            this.settle(false)
             this.close()
-            this.func()
         }
         submits.createEl('button', { text: "Create"})
             .addEventListener("click",createFolder);
         submits.createEl('button', { text: "Don't Create"})
             .addEventListener("click",notCreateFolder);
     }
-}
 
+    onClose() {
+        this.contentEl.empty()
+        if (this.resolveFn || this.rejectFn) this.settle(false)
+    }
+}
 
 /*
  * Class that can be added to an existing inputElement to add suggestions.
@@ -97,22 +117,29 @@ abstract class AddTextSuggest extends AbstractInputSuggest<string> {
         return t
     }
 
-    doFuzzySearch(target:string,maxResults=20,minScore=-2) : string[] {
-        if( ! target || target.length < 2 ) return []
+    //TODO: Check this function
+    doFuzzySearch(target: string, maxResults = 20, minScore = -2): string[] {
+        if (!target || target.length < 2) return []
+
         const fuzzy = prepareFuzzySearch(target)
-        const matches:[string,SearchResult][] = this.content.map((c)=>[c,fuzzy(c)])
-        const goodMatches = matches.filter((i)=>(i[1] && i[1]['score'] > minScore))
-        goodMatches.sort((c)=>c[1]['score'])
-        const ret = goodMatches.map((c)=>c[0])
-        return ret.slice(0,maxResults)
+
+        return this.content
+            .flatMap((content): [string, SearchResult][] => {
+                const result = fuzzy(content)
+                return result ? [[content, result]] : []
+            })
+            .filter(([, result]) => result.score > minScore)
+            .sort(([, a], [, b]) => b.score - a.score)
+            .map(([c]) => c)
+            .slice(0, maxResults)
     }
 
     renderSuggestion(content: string, el: HTMLElement): void {
         el.setText(content);
     }
 
-    selectSuggestion(content: string, evt: MouseEvent | KeyboardEvent): void {
-        let [head,tail] = this.getParts(this.inputEl.value)
+    selectSuggestion(content: string, _evt: MouseEvent | KeyboardEvent): void {
+        const [head,_tail] = this.getParts(this.inputEl.value)
         //console.log(`Got '${head}','${tail}' from `, this.inputEl.value)
         if( head.length > 0 ) {
             this.onSelectCb(head + ", "+content);
@@ -139,7 +166,7 @@ abstract class AddTextSuggest extends AbstractInputSuggest<string> {
 
 export class TagSuggest extends AddTextSuggest {
 	getContent() {
-		// @ts-ignore - this is an undocumented function...
+		// @ts-expect-error - this is an undocumented function...
 		const tagMap:Map<string,any> = this.app.metadataCache.getTags();
         return Object.keys(tagMap).map((k)=>k.replace("#",""))
 	  }
@@ -188,7 +215,3 @@ export class ContentEditableTest extends Modal {
     }
 }
 */
-
-export function ucFirst(s: string): string {
-    return s[0].toUpperCase() + s.substring(1) 
-}
