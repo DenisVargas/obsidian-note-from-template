@@ -1,5 +1,4 @@
-import {  TFolder, Editor, Plugin } from 'obsidian';
-// import { FullTemplate } from './Template';
+import {  TFolder, Editor } from 'obsidian';
 /*
  * This file contains common objects used by the whole templating system
  */
@@ -36,7 +35,6 @@ export interface ReplacementOptions {
 	willReplaceSelection:boolean;
 }
 
-
 /*
  * Identifies the template in the vault - used to create the command for it
  * These can only be updated by reloading the plugin at the moment
@@ -47,11 +45,10 @@ export interface TemplateMetadata {
 	path: string; //Path of the template file
 }
 
-
 /*
  * Settings for what the template should do when activated
  */
-export interface TemplateActionSettings {
+export interface iFT_TemplateExecutionSettings {
     /**
      * Defines whether the selected editor text should be replaced with the generated replacement text.
      *
@@ -59,7 +56,7 @@ export interface TemplateActionSettings {
      * - "sometimes": replace only when there is meaningful selected input.
      * - "never": do not replace selection.
      */
-	replaceSelection: ReplaceType;
+	selectionReplacementPolicy: ReplaceType;
     /**
      * Controls whether a note should be created/opened and where it opens.
      *
@@ -69,53 +66,53 @@ export interface TemplateActionSettings {
      * - "open-pane": create and open in split pane.
      * - "open-tab": create and open in new tab.
      */
-	createOpen: CreateType;
+	outputNoteHandling: CreateType;
     /**
      * Destination folder path (vault-relative) where generated notes should be written.
      * This value can come from plugin defaults or be overridden per template.
      */
-    outputDirectory:string;
+    outputDirectoryPath:string;
     /**
      * Comma-separated list of field ids used to map user/editor input into template data.
      * Example: "title,body,tags".
      */
-    inputFieldList:string;
+    inputFieldSpec:string;
     /**
      * Candidate replacement string templates used for editor selection replacement.
      * The first item is typically the default replacement option.
      */
-    textReplacementTemplates:string[];
+    selectionReplacementTemplates:string[]; //TODO: Candidato a eliminar.
     /**
      * Filename template used to derive the final output note name.
      * Usually contains placeholders resolved during rendering, e.g. "{{title}}".
      */
-    templateFilename:string;
+    outputFilenameTemplate:string;
 }
 
-export interface FT_PluginSettings extends TemplateActionSettings {
+export interface iFT_PluginSettings extends iFT_TemplateExecutionSettings {
     /**
      * Vault-relative path of the folder where template markdown files are stored.
      * Scanned by `loadFromDefaultLocation()` to discover and register available templates.
-     * Plugin-specific — not part of {@link TemplateActionSettings}.
+     * Plugin-specific — not part of {@link iFT_TemplateExecutionSettings}.
      */
-    templateDirectory: string;
+    templateDirectoryPath: string;
     /**
      * Regex delimiter used to split the active editor selection into individual field values.
      * Passed to `parseInput()` when mapping raw selection text to template data fields.
-     * Plugin-specific — not part of {@link TemplateActionSettings}.
+     * Plugin-specific — not part of {@link iFT_TemplateExecutionSettings}.
      */
-    inputSplit: string;
+    inputSplitPattern: string;
     /**
      * Reserved configuration string for future plugin-level settings.
-     * Plugin-specific — not part of {@link TemplateActionSettings}.
+     * Plugin-specific — not part of {@link iFT_TemplateExecutionSettings}.
      */
-    config: string;
+    pluginConfigRaw: string;
     /**
      * Controls whether the input UI shows suggestions when filling template fields.
      * When `true`, the field inputs display autocomplete candidates from the vault.
-     * Plugin-specific — not part of {@link TemplateActionSettings}.
+     * Plugin-specific — not part of {@link iFT_TemplateExecutionSettings}.
      */
-    inputSuggestions: boolean;
+    enableInputSuggestions: boolean;
 }
 
 /*
@@ -158,29 +155,27 @@ export interface TemplateField {
     description: string 
 }
 
-
 /*
  * All of the information required to fill out a template with data.
- * Extends TemplateActionSettings so that the effective action settings (merged from global
+ * Extends iFT_TemplateExecutionSettings so that the effective action settings (merged from global
  * defaults and per-template overrides) travel with the template at execution time.
  */
-export interface ActiveTemplate extends TemplateActionSettings {
+export interface ActiveTemplate extends iFT_TemplateExecutionSettings {
     /** The currently selected text in the editor at the moment the template was launched. */
-    input: string;
+    editorSelection: string;
     /** Identifies the template (id, name, vault path) — used to register/invoke the command. */
-    templateID: TemplateMetadata;
+    templateMetadata: TemplateMetadata;
     /** Raw markdown body of the template file (everything after the frontmatter). */
-    templateBody: string;
+    templateFileContent: string;
     /** Parsed YAML frontmatter of the template file as a key-value map. */
     templateProperties: Record<string, unknown>;
     /** Ordered list of fields declared in the template, used to build the input UI. */
-    fields: TemplateField[];
+    fields: TemplateField[]; //TODO: Esto tiene que reemplazarse.
     /** Handlebars template string for replacing the active editor selection on submit. */
-    textReplacementString: string;
+    textReplacement_Pattern: string;
     /** Map of field id → current value, populated progressively as the user fills the form. */
-    data: Record<string, string>;
+    textReplacement_data: Record<string, string>;
 }
-
 
 /*
  * Just produced in response to scanning for templates? Perhaps?
@@ -189,4 +184,52 @@ export interface TemplateFolderSpec {
     location:TFolder
     depth:number
     numTemplates:number
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                   Events                                   */
+/* -------------------------------------------------------------------------- */
+
+/** Typed ids for plugin-local DOM events used by the template workflow. */
+export enum FT_DomEventId {
+    ExecuteTemplate = "FT_executeTemplate",
+    TemplateModalClose = "FT_templateModalClose",
+}
+
+/**
+ * Event payload emitted when a template is submitted for execution.
+ * Carries all context needed to invoke `TemplateProcessor.executeTemplateById()` and process the template.
+ */
+export type TemplateSubmitEvent = {
+    readonly activeTemplate: ActiveTemplate;
+    readonly replacementOptions: ReplacementOptions;
+    // Direct access to values needed for executeTemplateById
+    readonly templateId: string;
+    readonly inputData: Record<string, string>;
+};
+
+/** Typed DOM custom event carrying a {@link TemplateSubmitEvent} payload in `detail`. */
+export type TemplateSubmitDomEvent = CustomEvent<TemplateSubmitEvent>;
+
+/**
+ * Event payload emitted when the template input modal is closed.
+ */
+export type TemplateModalCloseEvent = {
+    readonly success: boolean;
+    readonly error?: Error;
+};
+
+/** Typed DOM custom event carrying a {@link TemplateModalCloseEvent} payload in `detail`. */
+export type TemplateModalCloseDomEvent = CustomEvent<TemplateModalCloseEvent>;
+
+export type FT_DomEventDetailMap = {
+    [FT_DomEventId.ExecuteTemplate]: TemplateSubmitEvent;
+    [FT_DomEventId.TemplateModalClose]: TemplateModalCloseEvent;
+};
+
+declare global {
+    interface HTMLElementEventMap {
+        [FT_DomEventId.ExecuteTemplate]: TemplateSubmitDomEvent;
+        [FT_DomEventId.TemplateModalClose]: TemplateModalCloseDomEvent;
+    }
 }

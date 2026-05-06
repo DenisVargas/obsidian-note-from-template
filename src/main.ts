@@ -1,57 +1,73 @@
 import { Plugin, App, MarkdownView, TFolder, type Editor, type PluginManifest, type TFile, type WorkspaceLeaf} from 'obsidian';
-import { TemplateInputModal} from './TemplateInputUI';
-import { FT_SettingTab } from './SettingsPane';
-import { TemplateProcessor } from './TemplateProcessing';
-import type { FT_PluginSettings, TemplateMetadata, ReplacementOptions, TemplateResult } from './Shared';
-import { FolderCreateModal } from './UISupport';
+import {
+	FT_DomEventId,
+	type iFT_PluginSettings,
+	type TemplateMetadata,
+	type ReplacementOptions,
+	type TemplateResult,
+	type TemplateModalCloseDomEvent,
+	type TemplateModalCloseEvent,
+	type TemplateSubmitDomEvent,
+	type TemplateSubmitEvent,
+} from './Shared.js';
+import { FT_SettingTab, FolderCreateModal, TemplateInputModal } from './UI/index.js';
+import { TemplateProcessor } from './TemplateProcessing.js';
+import { printObjectProperties } from './utils.js'
 
-export class FT_Plugin extends Plugin {
+export default class FT_Plugin extends Plugin {
 	
 	/**
 	 * Plugin settings loaded from Obsidian's data store.
 	 * Undefined until {@link loadSettings} is called during plugin initialization.
 	 */
-	settings: FT_PluginSettings | undefined;
+	settings: iFT_PluginSettings | undefined;
 	/**
 	 * Template processor responsible for managing and preparing templates.
 	 * Initialized during plugin load with the vault instance.
 	 * Undefined until {@link onload} is called.
 	*/
 	processor: TemplateProcessor | undefined;
+	/** DOM event target used as the plugin-local event bus for template workflow events. */
+	eventBus: HTMLDivElement;
 	settingsTab: FT_SettingTab; //UI
 	folderCreateModal: FolderCreateModal;
 	templateInputModal: TemplateInputModal;
 	addedCommands: string[];
-	
-	private _reIndexTemplatesCallback: () => void;
 
 	constructor(app: App, manifest: PluginManifest) {
 		super(app, manifest);
 		console.log(`Root is ${this.app.vault.getRoot()}`)
 		this.addedCommands = [];
+		this.eventBus = document.createElement('div');
 		this.processor = new TemplateProcessor(this);
 		this.settingsTab = new FT_SettingTab(this);
 
 		/* ------------------------------- Obsidian UI ------------------------------ */
 		
 		this.folderCreateModal = new FolderCreateModal(this);
-		this.templateInputModal = new TemplateInputModal(this);
-		
-		/* -------------------------- Re-Indexing Callback -------------------------- */
-		this._reIndexTemplatesCallback = () => {
-			this.indexTemplates()
-			console.log("Reloaded Templates!")
-		};
+		this.templateInputModal = new TemplateInputModal(this);		
 	}
 
 	async onload() {
-		this.settings = await this.loadSettings(); //Explict load settings from disk
+		console.log("main::OnLoad()")
+		const settings = await this.loadSettings(); //Explict load settings from disk
+		this.settings = settings
 		this.addSettingTab(this.settingsTab);
-		
-		this.processor?.loadFromDefaultLocation();
 
-		this.addCommand({id:"reload",name:"Re-index Templates",callback: this._reIndexTemplatesCallback})
-		this.app.workspace.onLayoutReady(this._reIndexTemplatesCallback);
+		this.registerDomEvent(this.eventBus, FT_DomEventId.ExecuteTemplate, async (event) => {
+			this.handleTemplateExecuteEvent((event as TemplateSubmitDomEvent).detail)
+		});
+		this.registerDomEvent(this.eventBus, FT_DomEventId.TemplateModalClose, (event) => {
+			this.handleTemplateModalCloseEvent((event as TemplateModalCloseDomEvent).detail)
+		});
+
+		const reIndexTemplatesCallback = async () => {
+			this.indexTemplates(settings)
+			console.log("Reloaded Templates!")
+		};
+		this.addCommand({id:"reload",name:"Re-index Templates",callback: reIndexTemplatesCallback})
+		
+		this.app.workspace.onLayoutReady(reIndexTemplatesCallback);
 	}
 
 	async onunload() {
@@ -60,17 +76,20 @@ export class FT_Plugin extends Plugin {
 		console.log('unloading plugin');
 	}
 
-	// Adds all the template commands - calls getTemplates which looks for files in the settings.templateDirectory
-	async indexTemplates() {
+	// Adds all the template commands - calls getTemplates which looks for files in the settings.templateDirectoryPath
+	async indexTemplates(settings: iFT_PluginSettings) {
 		const processor = this.processor;
 
 		if(processor){
-			const loadResult = await processor.loadFromDefaultLocation()
+			const loadResult = await processor.loadFromDefaultLocation(settings)
 			if (!loadResult.ok) {
 				console.error(loadResult.error.message)
 				return
 			}
-			console.log("Got templates: ", Object.values(loadResult.value).map(entry => entry.meta.path).join(", "))
+			const paths = Object
+				.values(loadResult.value as Record<string, { meta: { path: string } }>)
+				.map(({ meta }) => meta.path);
+			console.log("Got templates:", paths.join(", "));
 		}
 		console.info("Reloaded Templates!");
 	}
@@ -83,6 +102,54 @@ export class FT_Plugin extends Plugin {
 		this.addedCommands.forEach(cid => {
 			this.removeCommand(cid)
 		})
+	}
+
+	private async handleTemplateExecuteEvent(payload: TemplateSubmitEvent): Promise<void> {
+		//Aviable: activeTemplate, options, templateId, inputData
+		const { templateId, inputData, replacementOptions } = payload
+		const { shouldCreateOpen, willReplaceSelection, shouldReplaceSelection, editor } = replacementOptions
+
+		if (!this.processor) {
+			console.error("Template processor is not available")
+			return
+		}
+
+		const executeResult = await this.processor.executeTemplateById(inputData, templateId)
+		if (!executeResult.ok) {
+			console.error(executeResult.error.message)
+			return
+		}
+
+		console.debug("Executed cached template", executeResult.value.meta)
+		const { output, meta } = executeResult.value;
+
+
+		//TODO: Implementar [MODE] para que pueda distinguirse entre templates que se insertan
+		//Vs templates que solo generan archivos.
+
+		//Deberia reemplazarse en el editor activo?
+		if(shouldReplaceSelection && editor){
+			//TODO: Esta funcionalidad es basicamente insertar el contenido en el editor.
+			// await this.insertFromTemplate(executeResult, replacementOptions)
+		}
+		//
+		else if(shouldCreateOpen){
+			//Aqui la idea es que el archivo se tiene que volcar.
+		}
+	}
+
+	private handleTemplateModalCloseEvent(payload: TemplateModalCloseEvent): void {
+		if (payload.success) {
+			console.debug("Template modal closed after submit")
+			return
+		}
+
+		if (payload.error) {
+			console.error("Template modal closed with error", payload.error)
+			return
+		}
+
+		console.debug("Template modal closed without submission")
 	}
 
 	/**
@@ -134,6 +201,7 @@ export class FT_Plugin extends Plugin {
 		}
 	}
 	
+	//TODO: Adaptar esto.
 	/**
 	 * Writes a filled-out template to the vault, optionally replaces the active editor selection,
 	 * and opens the newly created file according to the provided options.
@@ -149,7 +217,7 @@ export class FT_Plugin extends Plugin {
 	 * @param options - Controls whether to create a file, replace the selection, and how to open the file.
 	 * @returns A discriminated union — check `ok` before accessing success or error fields.
 	 */
-	async writeTemplate(result:TemplateResult, options:ReplacementOptions) : Promise<
+	async insertFromTemplate(result:TemplateResult, options:ReplacementOptions) : Promise<
 		| { ok: true;  fileCreated: boolean; filePath?: string; replacedSelection: boolean; openedFile: boolean }
 		| { ok: false; code: "CREATE_FILE_FAILED" | "OPEN_FILE_FAILED"; message: string; cause?: unknown }
 	> {
@@ -269,23 +337,30 @@ export class FT_Plugin extends Plugin {
 	 *
 	 * @returns The resolved plugin settings, combining persisted values with defaults.
 	 */
-	async loadSettings(): Promise<FT_PluginSettings> {
-		const DEFAULT_SETTINGS: FT_PluginSettings = {
-			outputDirectory:"",
-			templateFilename:"{{title}}",
-			inputFieldList:"title,body",
-			textReplacementTemplates:["[[{{title}}]]"],
-			templateDirectory: 'templates',
-			replaceSelection: "always",
-			createOpen: "open-tab",
-			inputSplit: "\\s+-\\s+",
-			inputSuggestions: true,
-			config: '[]'
+	async loadSettings(): Promise<iFT_PluginSettings> {
+		const DEFAULT_SETTINGS: iFT_PluginSettings = {
+			outputDirectoryPath:"",
+			outputFilenameTemplate:"{{title}}",
+			inputFieldSpec:"title,body",
+			selectionReplacementTemplates:["[[{{title}}]]"],
+			templateDirectoryPath: 'templates',
+			selectionReplacementPolicy: "always",
+			outputNoteHandling: "open-tab",
+			inputSplitPattern: "\\s+-\\s+",
+			enableInputSuggestions: true,
+			pluginConfigRaw: '[]'
 		}
-		return await Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const fromDisk = await this.loadData();
+		// console.log(`LoadSettings::En el disco:\n${printObjectProperties(fromDisk)}\n`)
+		const defaultSetting = await Object.assign({}, DEFAULT_SETTINGS, fromDisk)
+		console.log(`Se carga la config por defecto:\n\n${printObjectProperties(defaultSetting)}\n`)
+		// console.log(`Esto deberia estar seteado: ${defaultSetting.outputDirectoryPath}`)
+		return defaultSetting
 	}
 
 	async saveSettings() {
-		await this.saveData(this.settings);
+		console.log("Se guarda la data")
+		console.log(this.settings)
+		await this.saveData(this.settings)
 	}
 }

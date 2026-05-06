@@ -45,3 +45,9 @@ export function ensureArray(input:any, backup:string[]) : string[] {
     if( typeof input === "string" ) return [input]
     return backupValue
 }
+
+export function printObjectProperties(obj: Record<string, unknown>): string {
+    return Object.entries(obj)
+        .map(([key, value]) => `${key}: ${String(value)}`)
+        .join("\n")
+}

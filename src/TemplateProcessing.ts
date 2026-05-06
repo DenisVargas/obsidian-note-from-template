@@ -1,14 +1,12 @@
-import {  TAbstractFile, TFile, TFolder, Vault,  parseYaml, stringifyYaml} from 'obsidian';
-import {  TemplateMetadata, TemplateActionSettings,  TEMPLATE_FIELDS, Result, Ok, Err } from './Shared'
-// ActiveTemplate
-// import { FullTemplate } from './Template';
-import { FT_Plugin } from './main';
+import { TAbstractFile, TFile, TFolder, Vault,  parseYaml, stringifyYaml} from 'obsidian';
+import { TemplateMetadata, iFT_TemplateExecutionSettings,  TEMPLATE_FIELDS, Result, Ok, Err, iFT_PluginSettings } from './Shared.js'
 import { compile } from 'handlebars';
+import FT_Plugin from './main.js';
 
 export class TemplateProcessor {
     plugin: FT_Plugin;
-    vault:Vault
-    private _templateCache: TemplateCacheMap = {}
+    vault: Vault;
+    private _templateCache: TemplateCacheMap = {};
 
     constructor( plugin: FT_Plugin) {
         this.plugin = plugin;
@@ -41,32 +39,32 @@ export class TemplateProcessor {
      *
      * @param rawSettings Template-local settings parsed from `template_settings` metadata.
      * @param globalSettings Plugin-wide default action settings.
-     * @returns A complete `TemplateActionSettings` object with defaults + overrides applied.
+     * @returns A complete `iFT_TemplateExecutionSettings` object with defaults + overrides applied.
      */
-    private parseTemplateSettings(rawSettings: Record<string, any>, globalSettings: TemplateActionSettings): TemplateActionSettings {
-        const resolved: TemplateActionSettings = {
+    private parseTemplateSettings(rawSettings: Record<string, any>, globalSettings: iFT_TemplateExecutionSettings): iFT_TemplateExecutionSettings {
+        const resolved: iFT_TemplateExecutionSettings = {
             ...globalSettings,
         }
 
         if (typeof rawSettings['template-output'] === 'string')
-            resolved.outputDirectory = rawSettings['template-output']
+            resolved.outputDirectoryPath = rawSettings['template-output']
 
         if (typeof rawSettings['template-input'] === 'string')
-            resolved.inputFieldList = rawSettings['template-input']
+            resolved.inputFieldSpec = rawSettings['template-input']
 
         if (typeof rawSettings['template-filename'] === 'string')
-            resolved.templateFilename = rawSettings['template-filename']
+            resolved.outputFilenameTemplate = rawSettings['template-filename']
 
         if (typeof rawSettings['template-should-replace'] === 'string')
-            resolved.replaceSelection = rawSettings['template-should-replace'] as TemplateActionSettings['replaceSelection']
+            resolved.selectionReplacementPolicy = rawSettings['template-should-replace'] as iFT_TemplateExecutionSettings['selectionReplacementPolicy']
 
         if (typeof rawSettings['template-should-create'] === 'string')
-            resolved.createOpen = rawSettings['template-should-create'] as TemplateActionSettings['createOpen']
+            resolved.outputNoteHandling = rawSettings['template-should-create'] as iFT_TemplateExecutionSettings['outputNoteHandling']
 
         if (Array.isArray(rawSettings['template-replacement']))
-            resolved.textReplacementTemplates = rawSettings['template-replacement']
+            resolved.selectionReplacementTemplates = rawSettings['template-replacement']
         else if (typeof rawSettings['template-replacement'] === 'string')
-            resolved.textReplacementTemplates = [rawSettings['template-replacement']]
+            resolved.selectionReplacementTemplates = [rawSettings['template-replacement']]
 
         return resolved
     }
@@ -81,19 +79,13 @@ export class TemplateProcessor {
      * - Per-template failures (read/parse/compile/duplicate id) are logged as warnings
      *   and do not abort processing of remaining templates.
      */
-    async loadFromDefaultLocation(): Promise<Result<TemplateCacheMap, Error>> {
-        let settings
-        try {
-            settings = await this.plugin.loadSettings();
-        } catch (error) {
-            return Err(new Error(`Couldn't load plugin settings: ${error instanceof Error ? error.message : String(error)}`));
-        }
+    async loadFromDefaultLocation(settings: iFT_PluginSettings): Promise<Result<TemplateCacheMap, Error>> {
 
-        if (!settings.templateDirectory || !settings.templateDirectory.trim())
+        if (!settings.templateDirectoryPath || !settings.templateDirectoryPath.trim())
             return Err(new Error("Template directory is empty or invalid"))
 
         this.cleanCache()
-        const templateIdentifiers = await this.getTemplateIdentifiersFromDirectory(settings.templateDirectory)
+        const templateIdentifiers = await this.getTemplateIdentifiersFromDirectory(settings.templateDirectoryPath)
         const nextCache: TemplateCacheMap = {}
 
         for (const templateIdentifier of templateIdentifiers) {
@@ -161,7 +153,6 @@ export class TemplateProcessor {
 
         //In a nutshell deberiamos invocar la ui, la ui requiere saber:
         // - Una representacion de los campos requeridos (Para mapear a inputs).
-        // - 
         // - Deberia retornar un inputData (esto se utiliza como informacion para rellenar el template real)
 
         inputData = this.preProcessTemplateInput(inputData, cached.templateSettings)
@@ -180,12 +171,10 @@ export class TemplateProcessor {
             meta: {
                 id: cached.meta.id,
                 name: cached.meta.name,
-                outputPath: `${cached.templateSettings.outputDirectory}.md`,
+                outputPath: `${cached.templateSettings.outputDirectoryPath}.md`,
             },
         })
     }
-
-    // Pre-process input before rendering with Handlebars.
 
     /**
      * Pre-processes structured input data before template rendering.
@@ -193,26 +182,25 @@ export class TemplateProcessor {
      * Current implementation is intentionally minimal:
      * it only destructures settings for future processing and returns input unchanged.
      */
-    private preProcessTemplateInput(inputData: Record<string, unknown>, settings: TemplateActionSettings): Record<string, unknown> {
+    private preProcessTemplateInput(inputData: Record<string, unknown>, settings: iFT_TemplateExecutionSettings): Record<string, unknown> {
         const {
-            replaceSelection,
-            createOpen,
-            outputDirectory,
-            inputFieldList,
-            textReplacementTemplates,
-            templateFilename,
+            selectionReplacementPolicy,
+            outputNoteHandling,
+            outputDirectoryPath,
+            inputFieldSpec,
+            selectionReplacementTemplates,
+            outputFilenameTemplate,
         } = settings
 
-        void replaceSelection
-        void createOpen
-        void outputDirectory
-        void inputFieldList
-        void textReplacementTemplates
-        void templateFilename
+        void selectionReplacementPolicy
+        void outputNoteHandling
+        void outputDirectoryPath
+        void inputFieldSpec
+        void selectionReplacementTemplates
+        void outputFilenameTemplate
 
         return inputData
     }
-
     /**
      * Post-processes rendered template output.
      *
@@ -220,22 +208,22 @@ export class TemplateProcessor {
      * TODO: use this to port Template.ts functionality here.
      * it only destructures settings for future processing and returns output unchanged.
      */
-    private postProcessTemplateOutput(output: string, settings: TemplateActionSettings): string {
+    private postProcessTemplateOutput(output: string, settings: iFT_TemplateExecutionSettings): string {
         const {
-            replaceSelection,
-            createOpen,
-            outputDirectory,
-            inputFieldList,
-            textReplacementTemplates,
-            templateFilename,
+            selectionReplacementPolicy,
+            outputNoteHandling,
+            outputDirectoryPath,
+            inputFieldSpec,
+            selectionReplacementTemplates,
+            outputFilenameTemplate,
         } = settings
 
-        void replaceSelection
-        void createOpen
-        void outputDirectory
-        void inputFieldList
-        void textReplacementTemplates
-        void templateFilename
+        void selectionReplacementPolicy
+        void outputNoteHandling
+        void outputDirectoryPath
+        void inputFieldSpec
+        void selectionReplacementTemplates
+        void outputFilenameTemplate
 
         return output
     }
@@ -454,7 +442,7 @@ type TemplateCacheEntry = {
     compiledTemplate: HandlebarsCompiledTemplate
     rawData: TemplateRawData
     /** Effective settings: global defaults merged with template-local raw overrides. */
-    templateSettings: TemplateActionSettings
+    templateSettings: iFT_TemplateExecutionSettings
 }
 
 /**

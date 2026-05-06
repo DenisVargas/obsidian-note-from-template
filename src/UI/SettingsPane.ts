@@ -1,7 +1,7 @@
 import { PluginSettingTab, Setting } from 'obsidian';
 //Aviable: MarkdownView, Modal, normalizePath, Notice, Plugin, TextComponent, TFile, TFolder
-import { FT_Plugin } from "./main"
-import type { CreateType,  FT_PluginSettings,  ReplaceType } from './Shared';
+import type { CreateType,  iFT_PluginSettings,  ReplaceType } from '../Shared.js';
+import FT_Plugin from "../main.js"
 
 export class FT_SettingTab extends PluginSettingTab {
 	plugin: FT_Plugin;
@@ -21,17 +21,23 @@ export class FT_SettingTab extends PluginSettingTab {
 		}
 	}
 
+	hide(): void{
+		console.log("Se cierra la wae");
+	}
+
 	async display(): Promise<void> {
 		const {containerEl} = this;
-		const pluginSettings: FT_PluginSettings = await this.plugin.loadSettings();
+		console.log(`SettingsPane::display()`)
+		const pluginSettings: iFT_PluginSettings = await this.plugin.loadSettings();
 		const processor = this.plugin.processor;
 
 		containerEl.empty();
 		containerEl.createEl('h2', {text: 'Note From Template Settings'});
 
+		//This is not saving
 		const dirSetting = new Setting(containerEl)
 			.setName('Template Directory')
-			.setDesc('Directory to read templates from')
+			.setDesc('Directory to read templates from');
 
 		// Finding the right template folder
 		const updateFolderDescription = (folder:string) => {
@@ -54,15 +60,17 @@ export class FT_SettingTab extends PluginSettingTab {
 			dirSetting.addDropdown(text => text
 				//.setPlaceholder('templates')
 				.addOptions(opts)
-				.setValue(pluginSettings.templateDirectory)
+				.setValue(pluginSettings.templateDirectoryPath)
 				.onChange(async (value) => {
-					pluginSettings.templateDirectory = value;
+					pluginSettings.templateDirectoryPath = value;
 					updateFolderDescription(value)
-					await this.plugin.indexTemplates();
+					this.plugin.settings = pluginSettings
 					await this.plugin.saveSettings();
+					//Is it a good idea to reindex the templates at this point?
+					await this.plugin.indexTemplates(pluginSettings);
 				}));
 			
-			updateFolderDescription(pluginSettings.templateDirectory)
+			updateFolderDescription(pluginSettings.templateDirectoryPath)
 		}
 
 
@@ -73,9 +81,9 @@ export class FT_SettingTab extends PluginSettingTab {
 				.addOption("always","Always")
 				.addOption("sometimes","If Selected")
 				.addOption("never","Never")
-				.setValue(pluginSettings.replaceSelection)
+				.setValue(pluginSettings.selectionReplacementPolicy)
 				.onChange(async (value) => {
-					pluginSettings.replaceSelection = value as ReplaceType;
+					pluginSettings.selectionReplacementPolicy = value as ReplaceType;
 					await this.plugin.saveSettings();
 				}));
 
@@ -88,18 +96,18 @@ export class FT_SettingTab extends PluginSettingTab {
 			.addOption("open","Create and open in this pane")
 			.addOption("open-pane","Create and open in new pane")
 			.addOption("open-tab","Create and open in new tab")
-			.setValue(pluginSettings.createOpen)
+			.setValue(pluginSettings.outputNoteHandling)
 			.onChange(async (value) => {
-				pluginSettings.createOpen = value as CreateType;
+				pluginSettings.outputNoteHandling = value as CreateType;
 				await this.plugin.saveSettings();
 			}));
 		new Setting(containerEl)
 		.setName('Default output directory')
 		.setDesc('Where to put notes if they have not specified with {{template-output}}, Default value is "/" (Your Vault\'s root)')
 		.addText(text => text
-			.setValue(pluginSettings.outputDirectory)
+			.setValue(pluginSettings.outputDirectoryPath)
 			.onChange(async (value:string) => {
-				pluginSettings.outputDirectory = value;
+				pluginSettings.outputDirectoryPath = value;
 				await this.plugin.saveSettings();
 			}));
 		new Setting(containerEl)
@@ -107,27 +115,27 @@ export class FT_SettingTab extends PluginSettingTab {
 		.setDesc('What to call notes if they have not specified {{template-filename}}')
 		.addText(text => text
 			.setPlaceholder("{{title}}")
-			.setValue(pluginSettings.templateFilename)
+			.setValue(pluginSettings.outputFilenameTemplate)
 			.onChange(async (value) => {
-				pluginSettings.templateFilename = value;
+				pluginSettings.outputFilenameTemplate = value;
 				await this.plugin.saveSettings();
 			}));
 		new Setting(containerEl)
 		.setName('Default replacement string')
 		.setDesc('What replacement string to use if the template has not specified using {{template-replacement}}')
 		.addText(text => text
-			.setValue(pluginSettings.textReplacementTemplates[0])
+			.setValue(pluginSettings.selectionReplacementTemplates[0])
 			.onChange(async (value) => {
-				pluginSettings.textReplacementTemplates[0] = value;
+				pluginSettings.selectionReplacementTemplates[0] = value;
 				await this.plugin.saveSettings();
 			}));
 		new Setting(containerEl)
 		.setName('Default field list')
 		.setDesc('What fields to expect if they template does not specify with {{template-input}}')
 		.addText(text => text
-			.setValue(pluginSettings.inputFieldList)
+			.setValue(pluginSettings.inputFieldSpec)
 			.onChange(async (value) => {
-				pluginSettings.inputFieldList = value;
+				pluginSettings.inputFieldSpec = value;
 				await this.plugin.saveSettings();
 			}));
 
@@ -135,18 +143,18 @@ export class FT_SettingTab extends PluginSettingTab {
 			.setName('Selection split')
 			.setDesc('A regex to split up the input selection to fill in extra fields in the note creation box. Should default to "\\s+-\\s+"')
 			.addText(text => text
-				.setValue(pluginSettings.inputSplit)
+				.setValue(pluginSettings.inputSplitPattern)
 				.onChange(async (value) => {
-					pluginSettings.inputSplit = value;
+					pluginSettings.inputSplitPattern = value;
 					await this.plugin.saveSettings();
 				}));
 		new Setting(containerEl)
 			.setName('Input Suggestions')
 			.setDesc('Add suggestion support to text boxes. Will add suggestions for links when typing [[, and for tags for a field called "tags"')
 			.addToggle(toggle => toggle
-				.setValue(pluginSettings.inputSuggestions)
+				.setValue(pluginSettings.enableInputSuggestions)
 				.onChange(async (value) => {
-					pluginSettings.inputSuggestions = value;
+					pluginSettings.enableInputSuggestions = value;
 					await this.plugin.saveSettings();
 				}));
 	}
