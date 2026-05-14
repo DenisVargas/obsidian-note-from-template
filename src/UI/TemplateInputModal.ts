@@ -1,437 +1,660 @@
 /**
  * Template input modal for collecting user data before template execution.
- * Builds a fluent UI using the builder pattern for dynamic field rendering.
  */
 
-import { Modal, Setting, ButtonComponent, TextComponent, TextAreaComponent, ToggleComponent, DropdownComponent } from 'obsidian';
-import FT_Plugin from '../main.js';
 import {
-    BAD_CHARS_FOR_FILENAMES_MATCH,
-    BAD_CHARS_FOR_FILENAMES_TEXT,
-    FT_DomEventId,
-    type FT_DomEventDetailMap,
-    type ActiveTemplate,
-    type CreateType,
-    type ReplacementOptions,
-    type TemplateField,
-} from '../Shared.js';
+	Modal,
+	Setting,
+	ButtonComponent,
+	TextComponent,
+	TextAreaComponent,
+	ToggleComponent,
+	DropdownComponent,
+    Value,
+} from "obsidian";
+import FT_Plugin from "../main.js";
+import {
+	BAD_CHARS_FOR_FILENAMES_MATCH,
+	BAD_CHARS_FOR_FILENAMES_TEXT,
+	FT_DomEventId,
+	ExecuteTemplateEvent,
+	OpenInputModalEvent,
+	ExtendedSettings,
+	type CreateType,
+	type TemplateField,
+    TemplateCacheEntry,
+} from "../Shared.js";
 import { DateTime } from "luxon";
-import { LinkSuggest, TagSuggest, TemplateStatusView } from './utils.js';
-import type { SubcontrolParams } from './types.js';
-import { capitalize } from '../utils.js';
+import { LinkSuggest, TagSuggest, TemplateStatusView } from "./utils.js";
+import { capitalize, parseCsvStringList } from "../utils.js";
+import { FT_TemplateProcessor } from "../TemplateProcessing.js";
+import { template } from "handlebars";
 
-class TemplateInputBuilder {
-    private readonly root: HTMLElement;
-    private readonly status: TemplateStatusView;
-
-    constructor(
-        private readonly modal: TemplateInputModal,
-        private readonly activeTemplate: ActiveTemplate,
-        private readonly options: ReplacementOptions,
-    ) {
-        this.root = modal.contentEl;
-        this.status = new TemplateStatusView(modal.modalEl, this.root);
-    }
-
-    addHeader(): this {
-        this.modal.modalEl.addClass("from-template-modal");
-        this.modal.titleEl.createEl('h4', { text: "Create from Template", cls: "from-template-title" });
-        return this;
-    }
-
-    addBody(): this {
-        this.status.setNeutral();
-        return this;
-    }
-
-    addInfoSection(): this {
-        this.modal.makeSubcontrol(this.root, {
-            title: "Template",
-            content: `${this.activeTemplate.templateMetadata.name}`,
-            rowCls: ["from-template-control-row-minimal-space"],
-        });
-
-        this.modal.makeSubcontrol(this.root, {
-            title: "Destination",
-            content: `${this.activeTemplate.outputDirectoryPath}/${this.activeTemplate.outputFilenameTemplate}.md`,
-            contentCls: ["from-template-code-span"],
-            rowCls: ["from-template-control-row-minimal-space"],
-            keyDisplay: "⌘+",
-        });
-
-        this.addSeparator();
-        return this;
-    }
-
-    addFieldsSection(): this {
-        const setValue = (id: string, value: string) => {
-            this.activeTemplate.textReplacement_data[id] = value;
-            this.status.setNeutral();
-        };
-
-        console.debug("Fields", this.activeTemplate.fields);
-        this.activeTemplate.fields.forEach((field, index) => {
-            this.modal.createInput(this.root, this.activeTemplate.textReplacement_data, field, setValue, index);
-        });
-
-        return this;
-    }
-
-    private addReplacementSection(): this {
-        const computeWillReplaceSelection = (): boolean => {
-            if (this.options.shouldReplaceSelection === "always") return true;
-            if (this.options.shouldReplaceSelection === "sometimes" && this.activeTemplate.editorSelection.length > 0) return true;
-            return false;
-        };
-
-        this.options.willReplaceSelection = computeWillReplaceSelection();
-
-        new Setting(this.root.createDiv({ cls: "from-template-control-row-undivided" }))
-            .setName("Replace selected text")
-            .addToggle((toggle) => toggle
-                .setValue(this.options.willReplaceSelection)
-                .onChange((value) => {
-                    this.options.willReplaceSelection = value;
-                    replacementText.setDisabled(!value);
-                }));
-
-        const replacementContainer = this.modal.makeSubcontrol(this.root, { title: "Replacement" });
-        const replacementText = new TextComponent(replacementContainer)
-            .setValue(this.activeTemplate.textReplacement_Pattern)
-            .onChange((value) => {
-                this.activeTemplate.textReplacement_Pattern = value;
-            })
-            .setDisabled(!this.options.willReplaceSelection);
-
-        replacementText.inputEl.addClass("from-template-subcontrol");
-
-        const fieldNames = this.activeTemplate.fields.map((field) => field.id);
-        fieldNames.push("templateResult");
-
-        const availableFields = this.modal.makeSubcontrol(this.root, {
-            title: "Available fields",
-            description: "for replacement string",
-        });
-
-        fieldNames.forEach((fieldName) => {
-            const button = availableFields.createEl("button", {
-                text: fieldName,
-                cls: ["from-template-inline-code-button"],
-            });
-            button.onClickEvent(() => {
-                replacementText.setValue(replacementText.getValue() + `{{${fieldName}}}`);
-                this.activeTemplate.textReplacement_Pattern = replacementText.getValue();
-            });
-        });
-
-        const alternatives = this.modal.makeSubcontrol(this.root, {
-            title: "Replacements",
-            description: "specified in the template",
-            keyDisplay: "^+",
-        });
-
-        this.activeTemplate.selectionReplacementTemplates.forEach((replacementValue, index) => {
-            const button = new ButtonComponent(alternatives)
-                .setButtonText(`${index + 1}: ${replacementValue}`)
-                .onClick(() => {
-                    replacementText.setValue(replacementValue);
-                    this.activeTemplate.textReplacement_Pattern = replacementValue;
-                }).buttonEl;
-
-            button.addClass("from-template-inline-code-button");
-            button.tabIndex = -1;
-            this.modal.scope.register(["Ctrl"], `${index + 1}`, () => {
-                replacementText.setValue(replacementValue);
-                this.activeTemplate.textReplacement_Pattern = replacementValue;
-            });
-        });
-
-        return this;
-    }
-
-    private addCreateOpenSection(): this {
-        this.addSeparator();
-
-        new Setting(this.root.createDiv({ cls: "from-template-control-row-undivided" }))
-            .setName("Create and open note")
-            .setDesc("Should the note be created / opened?")
-            .addDropdown((dropdown) => {
-                dropdown
-                    .addOption("none", "Don't create")
-                    .addOption("create", "Create, but don't open")
-                    .addOption("open", "Create and open")
-                    .addOption("open-pane", "Create and open in new pane")
-                    .addOption("open-tab", "Create and open in new tab")
-                    .setValue(this.options.shouldCreateOpen)
-                    .onChange((value) => {
-                        this.options.shouldCreateOpen = value as CreateType;
-                    });
-            });
-
-        return this;
-    }
-
-    addSubmitSection(): this {
-        this.addSeparator();
-
-        this.modal.renderSubmitSection(this.root, async () => {
-            try {
-                this.modal.emit(FT_DomEventId.ExecuteTemplate, {
-                    activeTemplate: this.activeTemplate,
-                    replacementOptions: this.options,
-                    templateId: this.activeTemplate.templateMetadata.id,
-                    inputData: { ...this.activeTemplate.textReplacement_data },
-                });
-                this.modal.markSubmitSucceeded();
-                this.modal.close();
-            } catch (error) {
-                console.debug("Unhandled error dispatching template event", error);
-                this.status.setError(error instanceof Error ? error.message : String(error));
-            }
-        });
-        return this;
-    }
-
-    render(): void {
-        this
-            .addHeader()
-            .addBody()
-            .addInfoSection()
-            .addFieldsSection()
-            .addReplacementSection()
-            .addCreateOpenSection()
-            .addSubmitSection();
-    }
-
-    private addSeparator(): void {
-        this.root.createEl("hr", { cls: "from-template-section-sep" });
-    }
-}
+type inputControlType = "area" | "text" | "note-title" | "choice" | "multi" | "currentDate";
 
 /**
  * Modal dialog that collects user input for filling out a template before writing the generated note.
  *
- * Opened via {@link openWith} with an {@link ActiveTemplate} (containing the compiled template,
- * its metadata, and the pre-populated data record) and {@link ReplacementOptions} (controlling
- * whether/how the active editor selection is replaced).
- *
- * Responsibilities:
- * - Renders one input control per template field, based on its `inputType` (text, area, choice, etc.).
- * - Manages the replacement-text toggle and lets the user pick from pre-defined replacement strings.
- * - Exposes a "Create and open" dropdown to override the note creation behaviour at submit time.
- * - Emits typed events for template submission and modal closure.
+ * Opened via {@link OpenInputModalEvent} with an {@link ExtendedSettings} (containing the compiled template,
+ * its metadata, and the pre-populated data record)(controlling whether/how the active editor selection is replaced).
  */
-export class TemplateInputModal extends Modal {
-    plugin: FT_Plugin;
+export class FT_TemplateInputModal extends Modal {
+	plugin: FT_Plugin;
 
-    private _activeTemplate: ActiveTemplate | undefined;
-    private _options: ReplacementOptions | undefined;
-    private _submitSucceeded = false;
+	private _processor: FT_TemplateProcessor | undefined;
+	private __targetTemplate: TemplateCacheEntry | undefined;
+	private _settings: ExtendedSettings | undefined;
+	private _busAbort = new AbortController();
+	private _status: TemplateStatusView;
 
-    constructor(plugin: FT_Plugin) {
-        super(plugin.app);
-        this.plugin = plugin;
-    }
+	constructor(plugin: FT_Plugin) {
+		super(plugin.app);
+		this.plugin = plugin;
+		this._status = new TemplateStatusView(this.modalEl, this.contentEl);
 
-    openWith(template: ActiveTemplate, options: ReplacementOptions): void {
-        this._activeTemplate = template;
-        this._options = options;
-        this._submitSucceeded = false;
-        super.open();
-    }
+		// Command Trigger Stage -> Input Gathering Stage
+		// Listen for "OpenInputModalEvent"
+		this.plugin.eventBus.addEventListener(
+			FT_DomEventId.openInputModal,
+			(event: Event) => {
+				console.log("Open Modal has ben called!");
+				console.log(event);
+				event.preventDefault();
+				event.stopImmediatePropagation();
+				event.stopPropagation();
 
-    emit<K extends FT_DomEventId>(id: K, detail: FT_DomEventDetailMap[K]): void {
-        this.plugin.eventBus.dispatchEvent(new CustomEvent(id, { detail }));
-    }
+				const openEvent = event as OpenInputModalEvent;
+				const { targetTemplate, processor, globalSettings } = openEvent.detail;
 
-    renderSubmitSection(root: HTMLElement, submitTemplate: () => Promise<void>): void {
-        const addDiv = root.createDiv({ cls: "from-template-control-row" });
-        addDiv.createDiv({ cls: "from-template-description-column" });
-        addDiv.createDiv({ cls: "from-template-control-column" })
-            .createEl('button', { text: "Add", cls: "from-template-submit" })
-            .addEventListener("click", () => {
-                void submitTemplate();
-            });
-        addDiv.createDiv({ cls: "from-template-key-column" })
-            .createDiv({ text: "↩", cls: "from-template-shortkey" });
-        this.scope.register(['Mod'], "enter", () => {
-            void submitTemplate();
-        });
-    }
+				this._processor = processor;
+				this.__targetTemplate = targetTemplate;
+				this._settings = globalSettings;
 
-    private renderForTemplate(activeTemplate: ActiveTemplate, options: ReplacementOptions): void {
-        new TemplateInputBuilder(this, activeTemplate, options).render();
-    }
+				this.render(); //Pre-render UI
+				super.open();
+			},
+			{ signal: this._busAbort.signal },
+		);
+	}
 
-    async onOpen() {
-        const activeTemplate = this._activeTemplate;
-        const options = this._options;
+	destroy(): void {
+		this._busAbort.abort();
+	}
 
-        if (options && activeTemplate) {
-            this.renderForTemplate(activeTemplate, options);
-        }
-        else {
-            console.error(`Options is ${options} and template is ${activeTemplate}`);
-        }
-    }
+	// onOpen() { } //Unused, keept for reference.
+	onClose() {
+		//Reset States
+		const { contentEl, titleEl } = this;
+		titleEl.empty(); //Garbage Collected
+		contentEl.empty(); //Garbage Collected
+		this._settings = undefined;
+	}
 
-    onClose() {
-        const { contentEl, titleEl } = this;
+	render(): void {
+		/* -------------------------- Input Gathering Stage ------------------------- */
 
-        this.emit(FT_DomEventId.TemplateModalClose, { success: this._submitSucceeded });
+		//TODO: Break settings here
 
-        titleEl.empty();
-        contentEl.empty();
-        this._activeTemplate = undefined;
-        this._options = undefined;
-        this._submitSucceeded = false;
-    }
+		//A nice Builder Pattern Here
+		this.addHeader()
+			.addBody()
+				.addInfoSection()
+				.addFieldsSection()
+				.addReplacementSection()
+				.addCreateOpenSection()
+				.addSubmitSection();
+	}
 
-    markSubmitSucceeded(): void {
-        this._submitSucceeded = true;
-    }
+	addHeader(): this {
+		this.modalEl.addClass("from-template-modal");
+		this.titleEl.createEl("h4", {
+			text: "Create from Template",
+			cls: "from-template-title",
+		});
+		return this;
+	}
 
-    makeSubcontrol(el: HTMLElement, params: SubcontrolParams): HTMLElement {
-        const { title, content, description, labelCls = [], contentCls = [], rowCls = [], keyDisplay } = params;
-        const sc = el.createDiv({ cls: ["from-template-control-row", ...rowCls] });
-        const label = sc.createDiv({ cls: "from-template-description-column" });
-        label.createDiv({ text: `${title}:`, cls: ["from-template-sublabel", ...labelCls] });
-        if (description) label.createDiv({ text: description, cls: ["from-template-label-description", ...labelCls] });
-        const contr = sc.createDiv({ cls: "from-template-control-column" });
-        if (content)
-            contr.createSpan({ text: `${content}`, cls: ["from-template-subcontrol", ...contentCls] });
-        if (keyDisplay) {
-            const key = sc.createDiv({ cls: "from-template-key-column" });
-            key.createDiv({ text: keyDisplay, cls: "from-template-shortkey" });
-        }
+	addBody(): this {
+		//TODO: This needs rework, its using a TemplateStatusView that hides elements constructed.
+		this._status.setNeutral();
+		return this;
+	}
 
-        return contr;
-    }
+	addInfoSection(): this {
 
-    createInput(parent: HTMLElement, data: Record<string, string>, field: TemplateField, setTemplateValue: (k: string, v: any) => void, index: number = -1, initial: string = "") {
-        const id = field.id;
+		/* -------------------------- Source Template info -------------------------- */
+		const templateRow = this.contentEl.createDiv({
+			cls: ["from-template-control-row", "from-template-control-row-minimal-space"],
+		});
 
-        if (id === "currentTitle") return;
-        if (id === "currentPath") return;
+		templateRow
+			.createDiv({
+				cls: "from-template-description-column",
+			})
+			.createDiv({
+				text: "Template:",
+				cls: ["from-template-sublabel"],
+			});
 
-        const controlEl = parent.createEl('div', { cls: "from-template-control-row" });
-        const labelContainer = controlEl.createEl("label", { cls: "from-template-description-column" });
-        labelContainer.createEl("label", { text: `${capitalize(field.id)}`, cls: "from-template-label-text" });
-        if (field.description && field.description.length > 0)
-            labelContainer.createDiv({ text: field.description, cls: "from-template-label-description" });
-        labelContainer.htmlFor = id;
+		templateRow
+			.createDiv({
+				cls: "from-template-control-column",
+			})
+			.createSpan({
+				text: `${this.__targetTemplate?.meta.path}`,
+				cls: ["from-template-subcontrol"],
+			});
 
-        const controlWrapper = controlEl.createEl('div', { cls: "from-template-control-column" });
+		/* ------------------------- Source Destination info ------------------------ */
+		//TODO: Destination no es dinamico, todavia... (no muestra el path final calculado)
+		const destinationRow = this.contentEl.createDiv({
+			cls: ["from-template-control-row", "from-template-control-row-minimal-space"],
+		});
+		destinationRow
+			.createDiv({
+				cls: "from-template-description-column",
+			})
+			.createDiv({
+				text: "Destination:",
+				cls: ["from-template-sublabel"],
+			});
 
-        const element = this.createInputControl(controlWrapper, data, field, setTemplateValue, index, initial);
-        const keyEl = controlEl.createEl('div', { cls: "from-template-key-column" });
+		destinationRow
+			.createDiv({
+				cls: "from-template-control-column",
+			})
+			.createSpan({
+				text: `${this._settings?.outputDirectoryPath}/${this._settings?.outputFilenameTemplate}.md`,
+				cls: ["from-template-subcontrol", "from-template-code-span"],
+			});
 
-        if (element) {
-            if (index === 0) element.focus();
-            element.addClass("from-template-control");
-            if (index <= 8) {
-                this.scope.register(["Mod"], `${index + 1}`, () => element.focus());
-                keyEl.createEl("div", { text: `${index + 1}`, cls: "from-template-shortkey" });
-            }
-        }
-    }
+		destinationRow
+			.createDiv({
+				cls: "from-template-key-column",
+			})
+			.createDiv({
+				text: "⌘+",
+				cls: "from-template-shortkey",
+			});
 
-    createInputControl(
-        controlEl: HTMLElement,
-        data: Record<string, string>,
-        field: TemplateField,
-        setTemplateValue: (k: string, v: any) => void,
-        index: number = -1,
-        initial: string = ""
-    ): HTMLElement {
-        const id = field.id;
-        const inputType = field.inputType;
+		this.addSeparator();
 
-        if (initial) data[field.id] = initial;
+		return this;
+	}
 
-        let textEl: HTMLElement = new HTMLElement();
+	addFieldsSection(): this {
+		//TODO: FIX THIS
+		const templateConfig = this._settings;
+		if (!templateConfig) return this;
 
-        switch (inputType) {
-            case "area": {
-                console.debug(field);
-                const textAreaEl = new TextAreaComponent(controlEl)
-                    .setValue(data[id])
-                    .onChange((value) => setTemplateValue(id, value));
-                textAreaEl.inputEl.rows = 5;
-                return textAreaEl.inputEl;
-            }
+		//At this stage templateConfig.fields is still undefined, so we have to construct it.
+		// * Fields is our input for the next stage!
+		const parsedFields = parseCsvStringList(templateConfig.rawInputFieldList);
+		const fieldsData: TemplateField[] = templateConfig.fields; //This is uninitialized at this point.
 
-            case "text": {
-                console.debug(field);
-                const initial = data[id] || (field.args.length ? field.args[0] : "");
-                const cb = (value: string) => setTemplateValue(id, value);
-                const textComponent = new TextComponent(controlEl)
-                    .setValue(initial)
-                    .onChange(cb);
-                textComponent.inputEl.size = 50;
-                textEl = textComponent.inputEl;
-                if (this.plugin.settings?.enableInputSuggestions) {
-                    if (id === "tags") new TagSuggest(textEl as HTMLInputElement, this.app, cb);
-                    else new LinkSuggest(textEl as HTMLInputElement, this.app, cb);
-                }
-                return textEl;
-            }
+		const setValue = (id: string, value: string) => {
+			templateConfig.textReplacement_data[id] = value;
+			this._status.setNeutral();
+		};
+		const submit = (index:number, id:string, value: string) =>{
+			console.log(`${id}: submit triggered with value ${value}`);
+			let next = index + 1;
+			if(next > fieldElements.length - 1)
+				next = 0;
+			fieldElements[next].focus();
+		}
 
-            case "note-title": {
-                console.debug(field);
-                const initial = data[id] || (field.args.length ? field.args[0] : "");
-                const initial_safe = initial.replace(BAD_CHARS_FOR_FILENAMES_MATCH, "");
-                data[id] = initial_safe;
-                const error = controlEl.createEl("div", { text: "Error! Characters not allowed in filenames: " + BAD_CHARS_FOR_FILENAMES_TEXT, cls: "from-template-error-text" });
-                const updateError = (v: string) => {
-                    if (v.match(BAD_CHARS_FOR_FILENAMES_MATCH)) error.removeAttribute("hidden");
-                    else error.setAttribute("hidden", "true");
-                };
-                updateError(initial_safe);
-                const textComponent = new TextComponent(controlEl)
-                    .setValue(initial_safe)
-                    .onChange((value) => { setTemplateValue(id, value); updateError(value) });
-                textComponent.inputEl.size = 50;
-                return textComponent.inputEl;
-            }
+		console.debug("Fields", parsedFields);
+		const fieldElements: HTMLElement[] = [];
+		parsedFields.forEach((parsedField, index) => {
+			let defaultType: inputControlType  = "text";
+			//Special Fields:
+			
+			//Body is a special field
+			if(parsedField === "body"){
+				defaultType = "area"
+			}
 
-            case "choice": {
-                const opts: Record<string, string> = {};
-                field.args.forEach(f => opts[f] = capitalize(f));
-                const dropDown = new DropdownComponent(controlEl)
-                    .addOptions(opts)
-                    .setValue(data[id])
-                    .onChange((value) => setTemplateValue(id, value));
-                return dropDown.selectEl;
-            }
+			if(parsedField === "templateResult") return;
 
-            case "multi": {
-                const selected: string[] = [];
-                const spanEl = controlEl.createSpan();
-                field.args.forEach((f) => {
-                    const d = spanEl.createDiv({ text: f });
-                    new ToggleComponent(d)
-                        .setTooltip(f)
-                        .onChange((value) => {
-                            if (value) selected.push(f);
-                            else selected.remove(f);
-                            setTemplateValue(id, selected.join(", "));
-                        });
-                });
-                return spanEl;
-            }
+			const field: TemplateField = {
+				id: parsedField,
+				inputType: defaultType,
+				args: [],
+				description: "",
+				alternatives: []
+			}
+			
+			// const id = field.id;
+			// if (id === "currentTitle") return;
+			// if (id === "currentPath") return;
+			//? We have to fill some defaults here?
+			// if(field.id === "title"){}
 
-            case "currentDate": {
-                const fmt = field.args[0] || 'yyyy-MM-dd';
-                const cur = DateTime.now().toFormat(fmt);
-                data[id] = cur;
-                const textEl = new TextComponent(controlEl)
-                    .setValue(cur)
-                    .onChange((value) => setTemplateValue(id, value));
-                textEl.inputEl.size = 50;
-                return textEl.inputEl;
-            }
-        }
-        return textEl;
-    }
+			const controlEl = this.contentEl.createEl("div", {
+				cls: "from-template-control-row",
+			});
+			const labelContainer = controlEl.createEl("label", {
+				cls: "from-template-description-column",
+			});
+			labelContainer.createEl("label", {
+				text: `${capitalize(field.id)}`,
+				cls: "from-template-label-text",
+			});
+			if (field.description && field.description.length > 0)
+				labelContainer.createDiv({
+					text: field.description,
+					cls: "from-template-label-description",
+				});
+			labelContainer.htmlFor = field.id;
+
+			const controlWrapper: HTMLDivElement = controlEl.createEl("div", {
+				cls: "from-template-control-column",
+			});
+
+			//New Empty data field.
+			const data: Record<string, string> = { [field.id]: field.id };
+			const element = this.createInputControl(
+				controlWrapper,
+				field,
+				data,
+				setValue,
+				submit,
+				index
+			)
+			
+			fieldElements.push(element);
+			const keyEl = controlEl.createEl("div", {
+				cls: "from-template-key-column",
+			});	
+			if (element) {
+				if (index === 0) element.focus();
+				element.addClass("from-template-control");
+				if (index <= 8) {
+					this.scope.register(["Mod"], `${index + 1}`, () => element.focus());
+					keyEl.createEl("div", {
+						text: `${index + 1}`,
+						cls: "from-template-shortkey",
+					});
+				}
+			}
+		});
+
+		return this;
+	}
+
+	private addReplacementSection(): this {
+		const options = this._settings;
+		if (!options) return this;
+
+		this.addSeparator();
+
+		//Añadimos un h2 "Source Text Replacement"
+		this.contentEl.createEl("h5", {
+			text: "Source Text Replacement",
+			cls: "from-template-section-title",
+		});
+		
+		/* ----------------------------- Replace toogle ----------------------------- */
+				options.isSelectionReplacementEnabled = false;
+		if (
+			(options.selectionReplacementPolicy === "always") ||
+			(options.selectionReplacementPolicy === "selected-only" && options.editorSelection.length > 0)
+		) options.isSelectionReplacementEnabled = true;
+		//Override
+		new Setting( this.contentEl.createDiv({ cls: "from-template-control-row-undivided" }))
+			.setName("Replace selected text")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(options.isSelectionReplacementEnabled)
+					.onChange((value) => {
+						options.isSelectionReplacementEnabled = value;
+						replacementText.setDisabled(!value);
+					}),
+			);
+		
+			/* ------------------------------- FieldNames ------------------------------- */
+			
+			const fieldNames: string[] = parseCsvStringList(options.rawInputFieldList);
+			fieldNames.push("templateResult");
+	
+			const availableFieldsRow = this.contentEl.createDiv({
+				cls: ["from-template-control-row"]
+			});
+			const availableFieldsLabel = availableFieldsRow.createDiv({
+				cls: "from-template-description-column"
+			});
+			availableFieldsLabel.createDiv({
+				text: "Available fields:",
+				cls: ["from-template-sublabel"]
+			});
+			availableFieldsLabel.createDiv({
+				text: "for replacement string",
+				cls: ["from-template-label-description"]
+			});
+			const availableFields = availableFieldsRow.createDiv({
+				cls: "from-template-control-column"
+			});
+	
+			fieldNames.forEach((fieldName) => {
+				const button = availableFields.createEl("button", {
+					text: fieldName,
+					cls: ["from-template-inline-code-button"],
+				});
+				button.onClickEvent(() => {
+					replacementText.setValue(
+						replacementText.getValue() + `{{${fieldName}}}`,
+					);
+					options.textReplacement_Pattern = replacementText.getValue();
+				});
+			});
+			
+			/* ----------------------------- Replacement Row ---------------------------- */
+			const replacementRow = this.contentEl.createDiv({
+				cls: ["from-template-control-row"],
+			});
+			replacementRow
+				.createDiv({
+					cls: "from-template-description-column",
+				})
+				.createDiv({
+					text: "Replacement:",
+					cls: ["from-template-sublabel"],
+				});
+			
+	
+			// Crear primero el div de la columna
+			const replacementColumn = replacementRow.createDiv({
+				cls: "from-template-control-column",
+			});
+			
+			//Rellenar options.textReplacement_Pattern
+			if(options.selectionReplacementTemplates){
+				options.textReplacement_Pattern = options.selectionReplacementTemplates;
+			}
+			console.log(options.textReplacement_Pattern); // * Uses template definition if aviable.
+	
+			// Luego crear el TextComponent usando ese div
+			const replacementText = new TextComponent(replacementColumn)
+				.setValue(options.textReplacement_Pattern)
+				.onChange((value) => {
+					options.textReplacement_Pattern = value;
+				})
+				.setDisabled(!options.isSelectionReplacementEnabled);
+			// Asegurar la clase en el input
+			replacementText.inputEl.addClass("from-template-subcontrol");
+
+		/* ---------------------------- Replacements Enum --------------------------- */
+		//! This enum was kinda unnecesary, since what we want is the "replacement" field for overrides.
+		// const alternativesRow = this.contentEl.createDiv({
+		// 	cls: ["from-template-control-row"]
+		// });
+		// const alternativesLabel = alternativesRow.createDiv({
+		// 	cls: "from-template-description-column"
+		// });
+		// alternativesLabel.createDiv({
+		// 	text: "Replacements:",
+		// 	cls: ["from-template-sublabel"]
+		// });
+		// alternativesLabel.createDiv({
+		// 	text: "specified in the template",
+		// 	cls: ["from-template-label-description"]
+		// });
+		// const alternatives = alternativesRow.createDiv({
+		// 	cls: "from-template-control-column"
+		// });
+		// const alternativesKey = alternativesRow.createDiv({
+		// 	cls: "from-template-key-column"
+		// });
+		// alternativesKey.createDiv({
+		// 	text: "^+",
+		// 	cls: "from-template-shortkey"
+		// });
+
+		// const alts = [options.selectionReplacementTemplates];
+		// alts.forEach(
+		// 	(replacementValue, index) => {
+		// 		const button = new ButtonComponent(alternatives)
+		// 			.setButtonText(`${index + 1}: ${replacementValue}`)
+		// 			.onClick(() => {
+		// 				replacementText.setValue(replacementValue);
+		// 				options.textReplacement_Pattern = replacementValue;
+		// 			}).buttonEl;
+
+		// 		button.addClass("from-template-inline-code-button");
+		// 		button.tabIndex = -1;
+		// 		this.scope.register(["Ctrl"], `${index + 1}`, () => {
+		// 			replacementText.setValue(replacementValue);
+		// 			options.textReplacement_Pattern = replacementValue;
+		// 		});
+		// 	},
+		// );
+
+		return this;
+	}
+
+	private addCreateOpenSection(): this {
+		const finalSettings = this._settings;
+		if (!finalSettings) return this;
+
+		this.addSeparator();
+
+		new Setting(
+			this.contentEl.createDiv({ cls: "from-template-control-row-undivided" }),
+		)
+			.setName("Create and open note")
+			.setDesc("Should the note be created / opened?")
+			.addDropdown((dropdown) => {
+				dropdown
+					.addOption("none", "Don't create")
+					.addOption("create", "Create, but don't open")
+					.addOption("open", "Create and open")
+					.addOption("open-pane", "Create and open in new pane")
+					.addOption("open-tab", "Create and open in new tab")
+					.setValue(finalSettings!.outputNoteHandling)
+					.onChange((value) => {
+						finalSettings!.outputNoteHandling = value as CreateType;
+					});
+			});
+
+		return this;
+	}
+
+	addSubmitSection(): this {
+		const finalSettings = this._settings;
+		if (!finalSettings) return this;
+
+		this.addSeparator();
+
+		const row = this.contentEl.createDiv({ cls: "from-template-control-row" });
+		row.createDiv({ cls: "from-template-description-column" });
+
+		// Execute Template Event
+		const submit = async () => {
+			try {
+				this.plugin.eventBus.dispatchEvent(
+					new ExecuteTemplateEvent({
+						templateId: finalSettings.templateMetadata.id,
+						finalSettings: finalSettings,
+						inputData: { ...finalSettings.textReplacement_data },
+					}),
+				);
+				this.close();
+			} catch (error) {
+				console.debug("Unhandled error dispatching template event", error);
+				this._status.setError(
+					error instanceof Error ? error.message : String(error),
+				);
+			}
+		};
+
+		row
+			.createDiv({ cls: "from-template-control-column" })
+			.createEl("button", { text: "Add", cls: "from-template-submit" })
+			.addEventListener("click", () => {
+				void submit();
+			});
+
+		row
+			.createDiv({ cls: "from-template-key-column" })
+			.createDiv({ text: "↩", cls: "from-template-shortkey" });
+
+		this.scope.register(["Mod"], "enter", () => {
+			void submit();
+		});
+
+		return this;
+	}
+
+	private addSeparator(): void {
+		this.contentEl.createEl("hr", { cls: "from-template-section-sep" });
+	}
+
+	createInputControl(
+		controlEl: HTMLElement, //Required. Root Element.
+		field: TemplateField,
+		data: Record<string, string>,
+		setTemplateValue: (k: string, v: any) => void,
+		submit: (i:number, k:string, v:any) => void,
+		// select: (i:number) => void,
+		index: number,
+		initial: string = ""
+	): HTMLElement {
+		// const name = field.id;
+		
+		console.debug(field);
+		if (initial) data[field.id] = initial; //Auto-Fill
+
+		try {
+			// let textEl = new HTMLDivElement(); //Debe construirse sobre algo previo.
+			let textEl = controlEl.createDiv();
+			const inputType = field.inputType;
+			const name = field.id;
+
+			switch (inputType) {
+				case "text": {
+					const initial = data[name] || (field.args.length ? field.args[0] : "");
+					
+					const update = (value: string) => {
+						console.debug(`${name} field has changed to ${value}`);
+						setTemplateValue(name, value)
+					};
+					const textComponent = new TextComponent(controlEl)
+						.setValue(initial)
+						.onChange(update);
+					textComponent.inputEl.size = 50;
+					
+					textEl = textComponent.inputEl;
+					textEl.onkeydown = (ev:KeyboardEvent) =>{ //* WORKS
+						// console.log(ev.code);
+						if(ev.code === "Enter"){
+							// console.log("ENTER");
+							submit(index, name, textComponent.getValue());
+						}
+					}
+					// textEl.onsubmit = () => {
+					// 	console.log("MANDO WEAS");
+					// }
+					// textEl.onClickEvent((ev) => {
+					// 	console.log("ONCLIC");
+					// })
+
+					//Runs when focus changes
+					// textEl.onblur = () =>{
+					// 	console.log("HE PERDIDO EL FOCO NIGGA");
+					// }
+					if (this.plugin.settings?.enableInputSuggestions) {
+						if (name === "tags")
+							new TagSuggest(textEl as HTMLInputElement, this.app, update);
+						else new LinkSuggest(textEl as HTMLInputElement, this.app, update);
+					}
+					return textEl;
+				}
+
+				case "area": {
+					const textAreaEl = new TextAreaComponent(controlEl)
+						.setValue(data[name])
+						.onChange((value) => setTemplateValue(name, value));
+					textAreaEl.inputEl.rows = 5;
+					const areaEl = textAreaEl.inputEl;
+					areaEl.onkeydown = (ev:KeyboardEvent) =>{ //* WORKS
+						console.log(ev.code);
+						if(!ev.shiftKey && ev.code === "Enter"){
+							// console.log("ENTER");
+							submit(index, name, textAreaEl.getValue());
+						}
+						//Si presiono tab cancelo.
+						//Si presiono control + 1 Selecciono un index especifico.
+					}
+					return textAreaEl.inputEl;
+				}
+	
+				case "note-title": {
+					const initial = data[name] || (field.args.length ? field.args[0] : "");
+					const initial_safe = initial.replace(BAD_CHARS_FOR_FILENAMES_MATCH, "");
+					data[name] = initial_safe;
+					const error = controlEl.createEl("div", {
+						text:
+							"Error! Characters not allowed in filenames: " +
+							BAD_CHARS_FOR_FILENAMES_TEXT,
+						cls: "from-template-error-text",
+					});
+					const updateError = (v: string) => {
+						if (v.match(BAD_CHARS_FOR_FILENAMES_MATCH))
+							error.removeAttribute("hidden");
+						else error.setAttribute("hidden", "true");
+					};
+					updateError(initial_safe);
+					const textComponent = new TextComponent(controlEl)
+						.setValue(initial_safe)
+						.onChange((value) => {
+							setTemplateValue(name, value);
+							updateError(value);
+						});
+					textComponent.inputEl.size = 50;
+					return textComponent.inputEl;
+				}
+	
+				case "choice": {
+					const opts: Record<string, string> = {};
+					field.args.forEach((f) => (opts[f] = capitalize(f)));
+					const dropDown = new DropdownComponent(controlEl)
+						.addOptions(opts)
+						.setValue(data[name])
+						.onChange((value) => setTemplateValue(name, value));
+					return dropDown.selectEl;
+				}
+	
+				case "multi": {
+					const selected: string[] = [];
+					const spanEl = controlEl.createSpan();
+					field.args.forEach((f) => {
+						const d = spanEl.createDiv({ text: f });
+						new ToggleComponent(d).setTooltip(f).onChange((value) => {
+							if (value) selected.push(f);
+							else selected.remove(f);
+							setTemplateValue(name, selected.join(", "));
+						});
+					});
+					return spanEl;
+				}
+	
+				case "currentDate": {
+					const fmt = field.args[0] || "yyyy-MM-dd";
+					const cur = DateTime.now().toFormat(fmt);
+					data[name] = cur;
+					const textEl = new TextComponent(controlEl)
+						.setValue(cur)
+						.onChange((value) => setTemplateValue(name, value));
+					textEl.inputEl.size = 50;
+					return textEl.inputEl;
+				}
+			}
+		} catch (error) {
+			console.log("Throws error when creating textEl.")
+			console.log(error)
+		}
+
+		return new HTMLDivElement();
+	}
 }

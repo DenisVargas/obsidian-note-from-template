@@ -1,6 +1,6 @@
 // Original function was "ucFirst".
 export function capitalize(s: string): string {
-    return s[0].toUpperCase() + s.substring(1) 
+	return s[0].toUpperCase() + s.substring(1);
 }
 
 /**
@@ -38,16 +38,31 @@ export function capitalize(s: string): string {
  * // Returns [] (backup is falsy)
  * ensureArray(undefined, null);
  */
-export function ensureArray(input:any, backup:string[]) : string[] {
-    const backupValue = backup ? backup : []
-    if( !input ) return backupValue
-    if( input instanceof Array ) return input
-    if( typeof input === "string" ) return [input]
-    return backupValue
+export function ensureArray(input: any, backup: string[]): string[] {
+	const backupValue = backup ? backup : [];
+	if (!input) return backupValue;
+	if (input instanceof Array) return input;
+	if (typeof input === "string") return [input];
+	return backupValue;
 }
 
+/**
+ * Parses a comma-separated string list into normalized items.
+ * Trims whitespace and removes empty entries.
+ */
+export function parseCsvStringList(value: string): string[] {
+	return value
+		.split(",")
+		.map((part) => part.trim())
+		.filter(Boolean);
+}
+
+//Utility for debugging
 export function printObjectProperties(obj: Record<string, unknown>): string {
-    return Object.entries(obj)
-        .map(([key, value]) => `${key}: ${String(value)}`)
-        .join("\n")
+	//If it gets a null or undefined object should not throw error.
+	if (!obj) return "";
+
+	return Object.entries(obj)
+		.map(([key, value]) => `${key}: ${String(value)}`)
+		.join("\n");
 }
