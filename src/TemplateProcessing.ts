@@ -19,7 +19,7 @@ import {
 	Ok,
 	Err,
 } from "./ErrorHandling.js";
-import { compile } from "handlebars";
+import { compile, parse, template } from "handlebars";
 import FT_Plugin from "./main.js";
 import { FT_TemplateInputModal } from "./UI/TemplateInputModal.js";
 import { parseCsvStringList } from "./utils.js";
@@ -27,18 +27,18 @@ import { parseCsvStringList } from "./utils.js";
 type TemplateCacheMap = Record<string, TemplateCacheEntry>;
 
 export class FT_TemplateProcessor {
-	plugin: FT_Plugin;
-	vault: Vault;
+	_plugin: FT_Plugin;
+	_vault: Vault;
 	private _templateCache: TemplateCacheMap = {};
 	private _busAbort = new AbortController();
 
 	constructor(plugin: FT_Plugin) {
-		this.plugin = plugin;
-		this.vault = plugin.app.vault;
+		this._plugin = plugin;
+		this._vault = plugin.app.vault;
 
 		// Input Gathering Stage -> Command Execution Stage
 		// Register to listen for TemplateExecutionEvents (called from UI: TemplateInputModal)
-		this.plugin.eventBus.addEventListener(
+		this._plugin.eventBus.addEventListener(
 			FT_DomEventId.ExecuteTemplate,
 			(event: Event) => {
 				console.log("Execute Template has ben called!");
@@ -57,7 +57,7 @@ export class FT_TemplateProcessor {
 
 	cleanCache(): void {
 		for (const entry of Object.values(this._templateCache)) {
-			this.plugin.removeCommand(entry.meta.id);
+			this._plugin.removeCommand(entry.meta.id);
 		}
 		this._templateCache = {};
 	}
@@ -201,6 +201,7 @@ export class FT_TemplateProcessor {
 				rawSettings,
 				settings,
 			)
+			// This is base Settings, complete the extended version bellow.
 
 			/* ----------------------------- Command Naming ----------------------------- */
 			
@@ -235,22 +236,25 @@ export class FT_TemplateProcessor {
 			// We cannot directly open the Input Modal, we have to raise an event instead.
 			// Template invocation Event
 			// For cleaning commands use this.cleanCache()
-			this.plugin.addCommand({
+			this._plugin.addCommand({
 				id: meta.id,
 				name: meta.name,
 				callback: () => {
 					// Command Trigger Stage -> Input Gathering Stage
-					const view = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
-					if (view && this && this.plugin.settings) {
+					const view = this._plugin.app.workspace.getActiveViewOfType(MarkdownView);
+					if (view && this && this._plugin.settings) {
 						const editor: Editor = view.editor;
-						const globalSettings = new ExtendedSettings(resolvedTemplateSettings, editor)
+						const preExecutionSettings = new ExtendedSettings(resolvedTemplateSettings, editor)
+
+						preExecutionSettings.templateMetadata = meta;
+
 						const detail: InputModalPayload = {
 							targetTemplate:cacheEntry,
 							processor: this,
-							globalSettings
+							globalSettings: preExecutionSettings
 						};
 						const openInputModal = new OpenInputModalEvent(detail);
-						this.plugin.eventBus.dispatchEvent(openInputModal);
+						this._plugin.eventBus.dispatchEvent(openInputModal);
 					}
 				},
 			});
@@ -297,8 +301,10 @@ export class FT_TemplateProcessor {
 
 			/* ------------------------ File Creation and Opening ----------------------- */
 			
-			// * This final output, is generated from input and the cached pre-compiled handlebars template
-			const finalOutput: string = render(inputData);
+			// This final output, is generated from input and the cached pre-compiled handlebars template
+			const finalOutput: string = render(inputData); //* OK
+			// console.log("Result Output is:");
+			// console.log(finalOutput);
 			
 			let resultFile: TFile; //The new File created as a vault file reference.
 			//?: Should create a new file and place the rendered content as body.
@@ -310,6 +316,9 @@ export class FT_TemplateProcessor {
 					return;				
 				case "create":
 					console.log("Create but dont open")
+
+					console.log(cached.meta.path); //TODO: Resolver el path real.
+					// this.newVaultFile(finalOutput, cached.meta.path)
 					return;
 				case "open":
 					console.log("Create and Open")
@@ -426,7 +435,7 @@ export class FT_TemplateProcessor {
 	): Promise<TFile[]> {
 		//TODO: Currently all .md files are valid as templates (no distintion)
 
-		const templateFolder: TFolder = this.vault.getAbstractFileByPath(
+		const templateFolder: TFolder = this._vault.getAbstractFileByPath(
 			directory,
 		) as TFolder;
 		if (!templateFolder) return Promise.all([]);
@@ -494,7 +503,7 @@ export class FT_TemplateProcessor {
 		vaultFile: TFile,
 	): Promise<Result<TemplateRawData, Error>> {
 		const _debugging = "TemplateProcessor.noteToTemplateData()::\n    ";
-		const data = await this.vault.cachedRead(vaultFile);
+		const data = await this._vault.cachedRead(vaultFile);
 
 		const matches = data.match(/---(.*?)---(.*)$/ms);
 		if (!matches)
@@ -548,7 +557,7 @@ export class FT_TemplateProcessor {
 	 */
 	async newVaultFile(content: string, outputPath: TFolder, fileName: string): Promise<TFile>{
 		const filePath = `${outputPath.path}/${fileName}`;
-		const newFile = await this.vault.create(filePath, content);
+		const newFile = await this._vault.create(filePath, content);
 		return newFile;
 	}
 
@@ -579,7 +588,7 @@ export class FT_TemplateProcessor {
 	 * @returns The number of `.md` files found in the folder, or `0` if the folder does not exist.
 	 */
 	countTemplates(folder: string): number {
-		const templateFolder: TFolder = this.vault.getAbstractFileByPath(
+		const templateFolder: TFolder = this._vault.getAbstractFileByPath(
 			folder,
 		) as TFolder;
 		if (!templateFolder) return 0;
@@ -607,11 +616,70 @@ export class FT_TemplateProcessor {
 				.forEach((f) => descend(f as TFolder, i + 1, all));
 		};
 		const result: TemplateFolderSpec[] = [];
-		descend(this.vault.getRoot(), 0, result);
+		descend(this._vault.getRoot(), 0, result);
 		console.debug(result);
 		return result;
 	}
+
+	isValidTemplate(value: string): boolean {
+	  if (!value || !value.trim()) return false;
+	
+	  // Detecta al menos un token Handlebars simple: {{campo}} o {{{campo}}}
+	  const hasHandlebarsField = /{{{?\s*[A-Za-z_][\w.-]*\s*}?}}/;
+	
+	  return hasHandlebarsField.test(value);
+	}
+
+	prepareTemplate(templateSource:string): Result<PreparedTemplate,Error>{
+		if(!templateSource || !templateSource.trim()){
+			return Err(new Error("TEmplate Source is empty"));
+		}
+
+		try {
+		  const compiled = compile(templateSource);
+		  const ast = parse(templateSource);
+		
+		  const fieldNames = Array.from(new Set(this.collectFieldNamesFromAst(ast)));
+		
+		  return Ok({
+			fieldNames,
+			render: (data: Record<string, unknown>) => compiled(data),
+		  });
+		} catch (error) {
+		  return Err(
+			new Error(
+			  error instanceof Error ? error.message : String(error),
+			),
+		  );
+		}
+	}
+
+	private collectFieldNamesFromAst(node: any): string[] {
+		const out: string[] = [];
+		const visit = (n: any) => {
+			if (!n || typeof n !== "object") return;
+
+			if (n.type === "PathExpression" && typeof n.original === "string") {
+				if (!n.original.startsWith("@") && n.original !== "this") {
+					out.push(n.original);
+				}
+			}
+		
+			for (const v of Object.values(n)) {
+				if (Array.isArray(v)) v.forEach(visit);
+				else if (v && typeof v === "object") visit(v);
+			}
+		};
+		
+		visit(node);
+		return out;
+	}
 }
+
+export type PreparedTemplate = {
+	fieldNames: string[];
+	render: (data:Record<string,unknown>) => string;
+};
 
 /*
  * Just produced in response to scanning for templates? Perhaps?

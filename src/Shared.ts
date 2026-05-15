@@ -215,7 +215,17 @@ export class ExtendedSettings implements iFT_ExecutionSettings {
 	templateDirectoryPath: string;
 	selectionReplacementPolicy: ReplacementStrategy;
 	outputNoteHandling: CreateType;
+	/**
+	 * @inheritdoc
+	 * This is part of input stage, points to the template-setted target directory.
+	 * Does not includes name or extention.
+	 */
 	outputDirectoryPath: string;
+	/**
+	 * @inheritdoc
+	 * This filename is treated as a valid Template to be resolved at input stage.
+	 * Does not includes extention.
+	 */
 	outputFilenameTemplate: string;
 	/** 
 	 * **Source File Replacement**

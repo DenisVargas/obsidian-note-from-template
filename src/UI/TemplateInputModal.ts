@@ -39,36 +39,87 @@ type inputControlType = "area" | "text" | "note-title" | "choice" | "multi" | "c
  * its metadata, and the pre-populated data record)(controlling whether/how the active editor selection is replaced).
  */
 export class FT_TemplateInputModal extends Modal {
-	plugin: FT_Plugin;
+	_plugin: FT_Plugin;
 
-	private _processor: FT_TemplateProcessor | undefined;
-	private __targetTemplate: TemplateCacheEntry | undefined;
-	private _settings: ExtendedSettings | undefined;
+	private _processor?: FT_TemplateProcessor;
+	private _targetTemplate?: TemplateCacheEntry;
+	private _settings?: ExtendedSettings;
 	private _busAbort = new AbortController();
 	private _status: TemplateStatusView;
 
+	/* ------------------------ Realtime Path Resolution ------------------------ */
+	private _mustResolvePath:boolean = false;
+	private _mustResolveName:boolean = false;
+
+	private _destinationInfoElement?: HTMLElement;
+	
+	private _destinationInfoNameFields?: string[];
+	private _nameTemplate?: string;
+	private _destinationInfoRenderName?: (data:Record<string,unknown>) => string;
+
+	private _destinationInfoPathFields?: string[];
+	private _pathTemplate?: string;
+	private _destinationInfoRenderPath?: (data:Record<string,unknown>) => string;
+
 	constructor(plugin: FT_Plugin) {
 		super(plugin.app);
-		this.plugin = plugin;
+		this._plugin = plugin;
 		this._status = new TemplateStatusView(this.modalEl, this.contentEl);
+		this._destinationInfoNameFields = [];
 
 		// Command Trigger Stage -> Input Gathering Stage
 		// Listen for "OpenInputModalEvent"
-		this.plugin.eventBus.addEventListener(
+		this._plugin.eventBus.addEventListener(
 			FT_DomEventId.openInputModal,
 			(event: Event) => {
 				console.log("Open Modal has ben called!");
-				console.log(event);
-				event.preventDefault();
-				event.stopImmediatePropagation();
-				event.stopPropagation();
 
 				const openEvent = event as OpenInputModalEvent;
 				const { targetTemplate, processor, globalSettings } = openEvent.detail;
 
 				this._processor = processor;
-				this.__targetTemplate = targetTemplate;
+				this._targetTemplate = targetTemplate;
 				this._settings = globalSettings;
+
+				console.debug("OTHER POSIBLE SETTINGS");
+				console.debug(this._settings?.outputDirectoryPath);
+				console.debug(this._settings?.outputFilenameTemplate);
+
+				// Reset State, just in case.
+				this._destinationInfoNameFields = [];
+				this._destinationInfoRenderName = undefined;
+				this._destinationInfoPathFields = [];
+				this._destinationInfoRenderPath = undefined;
+
+				// Dinamic Name
+				this._mustResolveName = this._processor.isValidTemplate(this._settings.outputFilenameTemplate);
+				if(this._mustResolveName){
+					console.info("Filename must be resolved");
+					this._nameTemplate = this._settings?.outputFilenameTemplate;
+					const result = this._processor.prepareTemplate(this._nameTemplate);
+					if(!result.ok) {
+						console.error(result.error);
+					}else{
+						const {fieldNames, render} = result.value;
+						this._destinationInfoNameFields = fieldNames;
+						this._destinationInfoRenderName = render;
+					}
+				}
+				
+				// Dinamic Path
+				this._mustResolvePath = this._processor.isValidTemplate(this._settings.outputDirectoryPath);
+				if (this._mustResolvePath) {
+					console.info("Directory must be resolved");
+					this._pathTemplate = this._settings.outputDirectoryPath;
+					const result = this._processor.prepareTemplate(this._pathTemplate);
+					if (!result.ok) {
+						console.error(result.error);
+					} else {
+						const { fieldNames, render } = result.value;
+						this._destinationInfoPathFields = fieldNames;
+						this._destinationInfoRenderPath = render;
+					}
+				}
 
 				this.render(); //Pre-render UI
 				super.open();
@@ -141,7 +192,7 @@ export class FT_TemplateInputModal extends Modal {
 				cls: "from-template-control-column",
 			})
 			.createSpan({
-				text: `${this.__targetTemplate?.meta.path}`,
+				text: `${this._targetTemplate?.meta.path}`,
 				cls: ["from-template-subcontrol"],
 			});
 
@@ -159,14 +210,15 @@ export class FT_TemplateInputModal extends Modal {
 				cls: ["from-template-sublabel"],
 			});
 
-		destinationRow
-			.createDiv({
-				cls: "from-template-control-column",
-			})
-			.createSpan({
-				text: `${this._settings?.outputDirectoryPath}/${this._settings?.outputFilenameTemplate}.md`,
-				cls: ["from-template-subcontrol", "from-template-code-span"],
-			});
+		const destinationValueContainer = destinationRow.createDiv({
+			cls: "from-template-control-column",
+		});
+
+		const destinationField = destinationValueContainer.createSpan({
+			text: `${this._settings?.outputDirectoryPath}/${this._settings?.outputFilenameTemplate}.md`,
+			cls: ["from-template-subcontrol", "from-template-code-span"],
+		});
+		this._destinationInfoElement = destinationField;
 
 		destinationRow
 			.createDiv({
@@ -202,6 +254,35 @@ export class FT_TemplateInputModal extends Modal {
 			if(next > fieldElements.length - 1)
 				next = 0;
 			fieldElements[next].focus();
+
+			if(!this._settings) return;
+
+			//This might require multiple fields.
+			if(this._mustResolveName && this._destinationInfoNameFields?.contains(id) && this._nameTemplate){
+				let name = this._nameTemplate;
+				if(this._destinationInfoRenderName){
+					name = this._destinationInfoRenderName({[id]:value});
+					console.log(`Resolved name is: ${name}`);
+					// this._settings?.outputFilenameTemplate //!No se puede sobreescribir en este instante
+				}
+				this._settings.outputFilenameTemplate = name;
+			}
+
+			//Resolve path
+			if( this._mustResolvePath && this._destinationInfoPathFields?.contains(id) && this._pathTemplate){
+				let path = this._pathTemplate;
+				if(this._destinationInfoRenderPath){
+					path = this._destinationInfoRenderPath({[id]:value});
+					console.log(`Resolved path is: ${path}`);
+				}
+				this._settings.outputDirectoryPath = path;
+			}
+
+			if(this._mustResolvePath || this._mustResolveName){
+				const path = this._settings.outputDirectoryPath;
+				const name = this._settings.outputFilenameTemplate;
+				this._destinationInfoElement?.setText(`${path}/${name}.md`);
+			}
 		}
 
 		console.debug("Fields", parsedFields);
@@ -462,6 +543,7 @@ export class FT_TemplateInputModal extends Modal {
 
 	addSubmitSection(): this {
 		const finalSettings = this._settings;
+		console.log(this._settings);
 		if (!finalSettings) return this;
 
 		this.addSeparator();
@@ -472,7 +554,7 @@ export class FT_TemplateInputModal extends Modal {
 		// Execute Template Event
 		const submit = async () => {
 			try {
-				this.plugin.eventBus.dispatchEvent(
+				this._plugin.eventBus.dispatchEvent(
 					new ExecuteTemplateEvent({
 						templateId: finalSettings.templateMetadata.id,
 						finalSettings: finalSettings,
@@ -563,7 +645,7 @@ export class FT_TemplateInputModal extends Modal {
 					// textEl.onblur = () =>{
 					// 	console.log("HE PERDIDO EL FOCO NIGGA");
 					// }
-					if (this.plugin.settings?.enableInputSuggestions) {
+					if (this._plugin.settings?.enableInputSuggestions) {
 						if (name === "tags")
 							new TagSuggest(textEl as HTMLInputElement, this.app, update);
 						else new LinkSuggest(textEl as HTMLInputElement, this.app, update);
