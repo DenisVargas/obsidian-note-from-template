@@ -25,6 +25,10 @@ import { FT_TemplateInputModal } from "./UI/TemplateInputModal.js";
 import { parseCsvStringList } from "./utils.js";
 
 type TemplateCacheMap = Record<string, TemplateCacheEntry>;
+export type PreparedTemplate = {
+	fieldNames: Record<string, string>;
+	render: (data:Record<string,unknown>) => string;
+};
 
 export class FT_TemplateProcessor {
 	_plugin: FT_Plugin;
@@ -96,7 +100,7 @@ export class FT_TemplateProcessor {
 		//We should be able to override global settings in a Template per Template basis.
 
 		if (typeof rawSettings["template-output"] === "string")
-			resolved.outputDirectoryPath = rawSettings["template-output"];
+			resolved.temptativeOutputFolder = rawSettings["template-output"];
 
 		if (typeof rawSettings["template-input"] === "string"){
 			const finalInputFieldList = Array.from(
@@ -113,7 +117,7 @@ export class FT_TemplateProcessor {
 
 		if (typeof rawSettings["template-filename"] === "string")
 			//This have to be resolved during execution phase.
-			resolved.outputFilenameTemplate = rawSettings["template-filename"];
+			resolved.temptativeFileName = rawSettings["template-filename"];
 
 		if (typeof rawSettings["template-should-replace"] === "string"){
 			resolved.selectionReplacementPolicy = rawSettings["template-should-replace"] as iFT_PluginSettings["selectionReplacementPolicy"];
@@ -283,7 +287,9 @@ export class FT_TemplateProcessor {
 		inputData: Record<string, unknown>,
 		finalSettings: ExtendedSettings
 	): Promise<void> {
-		/* ------------------------- Command Execution Stage ------------------------ */
+		/* -------------------------------------------------------------------------- */
+		/*                           Command Execution Stage                          */
+		/* -------------------------------------------------------------------------- */
 		const cached = this.getCachedTemplate(templateId);
 		if (!cached) {
 			throw new Error(`Template id '${templateId}' is not loaded in cache`)
@@ -293,20 +299,32 @@ export class FT_TemplateProcessor {
 		const render = cached.compiledTemplate;
 		// const { frontmatter, template_settings, body } = cached.rawData; //Aviable just in case.
 
-		const outputPath = finalSettings.outputDirectoryPath + name;
-		console.log(outputPath);
-
-		try {
-			//TODO: Implement [MODE] for distintion between insertion and new File Creation.
-
-			/* ------------------------ File Creation and Opening ----------------------- */
+		/* ------------------------ Text (Editor) Replacement ----------------------- */
+		//TODO:T2 Esto deberia hacerse antes de abrir el archivo, para evitar errores.
+		//At this point, we already have the file created if needed, only need to resolve insertion/replacement.
+		//Here we should replace editor selection for compatibility with current version.
+		//For text replacement, we should reconstruct it somehow.
+		if (finalSettings.selectionReplacementPolicy && finalSettings.editorReference) {
+			//Issue1
+			//Esta funcionalidad lo que hace realmente es reemplazar una seleccion por un enlace al nuevo archivo creado.
 			
+			// await this.insertFromTemplate(executeResult, replacementOptions)
+			console.debug("Should replace selection");
+			// editor.replaceSelection(finalOutput);
+		}
+
+		//TODO: Implement [MODE] for distintion between insertion and new File Creation.
+
+		/* ------------------------ File Creation and Opening ----------------------- */
+		try {
+			const targetPath = finalSettings.outputDirectory;
+			const targetFileName = finalSettings.outputFileName;
 			// This final output, is generated from input and the cached pre-compiled handlebars template
 			const finalOutput: string = render(inputData); //* OK
 			// console.log("Result Output is:");
 			// console.log(finalOutput);
-			
 			let resultFile: TFile; //The new File created as a vault file reference.
+			
 			//?: Should create a new file and place the rendered content as body.
 			switch(finalSettings.outputNoteHandling){
 				case "none":
@@ -315,36 +333,22 @@ export class FT_TemplateProcessor {
 					//This functionality should be replaced by insertion mode.
 					return;				
 				case "create":
-					console.log("Create but dont open")
-
-					console.log(cached.meta.path); //TODO: Resolver el path real.
-					// this.newVaultFile(finalOutput, cached.meta.path)
+					resultFile = await this.newVaultFile(finalOutput, targetPath, targetFileName);
 					return;
 				case "open":
-					console.log("Create and Open")
+					resultFile = await this.newVaultFile(finalOutput, targetPath, targetFileName);
+					this._plugin.openFile(resultFile,'current');
 					return
 				case "open-tab":
-					console.log("Create and Open in new Tab")
+					resultFile = await this.newVaultFile(finalOutput, targetPath, targetFileName);
+					this._plugin.openFile(resultFile,'tab');
 					return
 				case "open-pane":
-					console.log("Create and Open in new Pane")
+					resultFile = await this.newVaultFile(finalOutput, targetPath, targetFileName);
+					this._plugin.openFile(resultFile,'split');
 					return;
 				default:
 					break;
-			}
-
-			/* ------------------------ Text (Editor) Replacement ----------------------- */
-
-			//At this point, we already have the file created if needed, only need to resolve insertion/replacement.
-			//Here we should replace editor selection for compatibility with current version.
-			//For text replacement, we should reconstruct it somehow.
-			if (finalSettings.selectionReplacementPolicy && finalSettings.editorReference) {
-				//Issue1
-				//Esta funcionalidad lo que hace realmente es reemplazar una seleccion por un enlace al nuevo archivo creado.
-				
-				// await this.insertFromTemplate(executeResult, replacementOptions)
-				console.debug("Should replace selection");
-				// editor.replaceSelection(finalOutput);
 			}
 		} catch (error) {
 			console.debug( `Couldn't execute template '${templateId}': ${error instanceof Error ? error.message : String(error)}` );
@@ -522,6 +526,7 @@ export class FT_TemplateProcessor {
 				//Filter template configs from content
 				if (TEMPLATE_FIELDS.contains(key)) {
 					templateConfigs[key] = fullFrontMatter[key];
+					console.log("TEMPLATE CONFIG:\n", key, "\n", templateConfigs[key]);
 				}
 				else fileProps[key] = fullFrontMatter[key];
 			}
@@ -555,8 +560,11 @@ export class FT_TemplateProcessor {
 	 * @param fileName - Desired file name.
 	 * @returns The created vault file descriptor.
 	 */
-	async newVaultFile(content: string, outputPath: TFolder, fileName: string): Promise<TFile>{
-		const filePath = `${outputPath.path}/${fileName}`;
+	async newVaultFile(content: string, outputPath: string, fileName: string): Promise<TFile>{
+		const filePath = `${outputPath}/${fileName}.md`;
+		console.log("Target Path")
+		console.log(filePath);
+		await this._plugin.createFolderIfNeeded(outputPath);
 		const newFile = await this._vault.create(filePath, content);
 		return newFile;
 	}
@@ -639,7 +647,7 @@ export class FT_TemplateProcessor {
 		  const compiled = compile(templateSource);
 		  const ast = parse(templateSource);
 		
-		  const fieldNames = Array.from(new Set(this.collectFieldNamesFromAst(ast)));
+		  const fieldNames = this.collectFieldNamesFromAst(ast);
 		
 		  return Ok({
 			fieldNames,
@@ -654,14 +662,14 @@ export class FT_TemplateProcessor {
 		}
 	}
 
-	private collectFieldNamesFromAst(node: any): string[] {
-		const out: string[] = [];
+	private collectFieldNamesFromAst(node: any): Record<string, string> {
+		const out: Record<string, string> = {};
 		const visit = (n: any) => {
 			if (!n || typeof n !== "object") return;
 
 			if (n.type === "PathExpression" && typeof n.original === "string") {
 				if (!n.original.startsWith("@") && n.original !== "this") {
-					out.push(n.original);
+					out[n.original] = "";
 				}
 			}
 		
@@ -676,11 +684,6 @@ export class FT_TemplateProcessor {
 	}
 }
 
-export type PreparedTemplate = {
-	fieldNames: string[];
-	render: (data:Record<string,unknown>) => string;
-};
-
 /*
  * Just produced in response to scanning for templates? Perhaps?
  */
@@ -689,24 +692,25 @@ type TemplateFolderSpec = {
 	depth: number;
 	numTemplates: number;
 };
+
 //! Unused
-/**
- * Output contract for a cached template execution.
- *
- * - `output`: plain rendered string ready to be written to a file.
- * - `meta.id`: unique id of the executed template.
- * - `meta.name`: display name assigned to the executed template.
- * - `meta.outputPath`: resolved destination path where the output is intended to be written.
- */
-type TemplateExecutionResult = {
-	/** Plain rendered string ready to be written to disk. */
-	output: string;
-	meta: {
-		/** Unique id of the executed template. */
-		id: string;
-		/** Human-readable name assigned to the executed template. */
-		name: string;
-		/** Resolved destination path targeted for writing the rendered output. */
-		outputPath: string;
-	};
-};
+// /**
+//  * Output contract for a cached template execution.
+//  *
+//  * - `output`: plain rendered string ready to be written to a file.
+//  * - `meta.id`: unique id of the executed template.
+//  * - `meta.name`: display name assigned to the executed template.
+//  * - `meta.outputPath`: resolved destination path where the output is intended to be written.
+//  */
+// type TemplateExecutionResult = {
+// 	/** Plain rendered string ready to be written to disk. */
+// 	output: string;
+// 	meta: {
+// 		/** Unique id of the executed template. */
+// 		id: string;
+// 		/** Human-readable name assigned to the executed template. */
+// 		name: string;
+// 		/** Resolved destination path targeted for writing the rendered output. */
+// 		outputPath: string;
+// 	};
+// };

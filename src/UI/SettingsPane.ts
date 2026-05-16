@@ -151,9 +151,9 @@ export class FT_SettingTab extends PluginSettingTab {
 				)
 				.addText((text) =>
 					text
-						.setValue(pluginSettings.outputDirectoryPath)
+						.setValue(pluginSettings.temptativeOutputFolder)
 						.onChange(async (value: string) => {
-							pluginSettings.outputDirectoryPath = value;
+							pluginSettings.temptativeOutputFolder = value;
 							await this.plugin.saveSettings();
 						}),
 				);
@@ -165,9 +165,9 @@ export class FT_SettingTab extends PluginSettingTab {
 				.addText((text) =>
 					text
 						.setPlaceholder("{{title}}")
-						.setValue(pluginSettings.outputFilenameTemplate)
+						.setValue(pluginSettings.temptativeFileName)
 						.onChange(async (value) => {
-							pluginSettings.outputFilenameTemplate = value;
+							pluginSettings.temptativeFileName = value;
 							await this.plugin.saveSettings();
 						}),
 				);

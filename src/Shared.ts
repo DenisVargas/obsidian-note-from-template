@@ -65,17 +65,65 @@ export interface TemplateResult {
 	replacementText: string; // The text to replace selected text in the editor with
 }
 
-/*
- * A particular field from a template
+/**
+ * Describes a single input field declared inside a template.
+ * Used to build the input UI and collect user data before template execution.
+ *
+ * Fields are parsed from the template's `template-input` frontmatter key,
+ * following the format: `{{fieldID:fieldType:arg1:arg2|Description text}}`
+ *
+ * @example
+ * // Template source:
+ * // {{title:text|Note title}}
+ * // {{status:choice:draft:published|Publishing status}}
+ * // {{body:area|Main content}}
+ * 
+ * @see https://github.com/mo-seph/obsidian-note-from-template#field-types
  */
 export interface TemplateField {
-	id: string; //Unique id, first bit of the field
-	inputType: string; // What kind of input is it?
-	args: string[];
-	alternatives: string[];
-	description: string;
-}
+    [key: string]: string | string[] | undefined;
+    /**
+     * Unique identifier for this field within the template.
+     * First segment of the field declaration. Used as the key in `textReplacement_data`
+     * and as the Handlebars variable name in the template body.
+     * @example "title", "body", "tags"
+     */
+    id: string;
 
+    /**
+     * Determines which input control is rendered for this field in the modal.
+     * @see inputControlType in TemplateInputModal.ts
+     * - `"text"` — Single-line text input (default)
+     * - `"area"` — Multi-line textarea
+     * - `"note-title"` — Text input with filename-safe character validation
+     * - `"choice"` — Dropdown with options from {@link args}
+     * - `"multi"` — Toggle group with options from {@link args}
+     * - `"currentDate"` — Auto-filled with current date, format from {@link args}[0]
+     */
+    inputType: string;
+
+    /**
+     * Human-readable hint displayed below the field label in the input modal.
+     * Parsed from the text after `|` in the field declaration.
+     * @example "The title of the new note"
+     */
+    description?: string;
+
+    /**
+     * Positional arguments that configure the field's behaviour, depending on `inputType`:
+     * - `"text"` / `"note-title"`: args[0] is the default value
+     * - `"choice"` / `"multi"`: each arg is an option shown to the user
+     * - `"currentDate"`: args[0] is the Luxon format string (e.g. `"yyyy-MM-dd"`)
+     */
+    args?: string[];
+
+    /**
+     * Alternative replacement strings associated with this field.
+     * Intended for use in the Source Text Replacement section of the modal.
+     * !Currently unused in active code paths.
+     */
+    alternatives?: string[];
+}
 export type TemplateRawData = {
 	frontmatter: Record<string, any>;
 	settings: Record<string, any>;
@@ -133,12 +181,16 @@ export interface iFT_PluginSettings {
 	 * Destination folder path (vault-relative) where generated notes should be written.
 	 * This value can come from plugin defaults or be overridden per template.
 	 */
-	outputDirectoryPath: string;
+	temptativeOutputFolder: string;
 	/**
 	 * Filename template used to derive the final output note name.
 	 * Usually contains placeholders resolved during rendering, e.g. "{{title}}".
 	 */
-	outputFilenameTemplate: string;
+	temptativeFileName: string;
+
+	outputDirectory: string;
+	outputFileName: string;
+
 	/**
 	 * Candidate replacement string templates used for editor selection replacement.
 	 * The first item is typically the default replacement option.
@@ -220,13 +272,15 @@ export class ExtendedSettings implements iFT_ExecutionSettings {
 	 * This is part of input stage, points to the template-setted target directory.
 	 * Does not includes name or extention.
 	 */
-	outputDirectoryPath: string;
+	temptativeOutputFolder: string;
 	/**
 	 * @inheritdoc
 	 * This filename is treated as a valid Template to be resolved at input stage.
 	 * Does not includes extention.
 	 */
-	outputFilenameTemplate: string;
+	temptativeFileName: string;
+	outputDirectory: string;
+	outputFileName: string;
 	/** 
 	 * **Source File Replacement**
 	 *
@@ -302,13 +356,16 @@ export class ExtendedSettings implements iFT_ExecutionSettings {
 		this.templateDirectoryPath = globalSettings.templateDirectoryPath;
 		this.selectionReplacementPolicy = globalSettings.selectionReplacementPolicy;
 		this.outputNoteHandling = globalSettings.outputNoteHandling;
-		this.outputDirectoryPath = globalSettings.outputDirectoryPath;
-		this.outputFilenameTemplate = globalSettings.outputFilenameTemplate;
+		this.temptativeOutputFolder = globalSettings.temptativeOutputFolder;
+		this.temptativeFileName = globalSettings.temptativeFileName;
 		this.selectionReplacementTemplates = globalSettings.selectionReplacementTemplates;
 		this.rawInputFieldList = globalSettings.rawInputFieldList;
 		this.inputSplitPattern = globalSettings.inputSplitPattern;
 		this.enableInputSuggestions = globalSettings.enableInputSuggestions;
 		this.pluginConfigRaw = globalSettings.pluginConfigRaw;
+
+		this.outputDirectory = "";
+		this.outputFileName = "";
 
 		/* ---------------------------- Extended Settings --------------------------- */
 		// This settings section are used for execution only.

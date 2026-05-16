@@ -34,8 +34,8 @@ export default class FT_Plugin extends Plugin {
 	/** DOM event target used as the plugin-local event bus for template workflow events. */
 	eventBus: HTMLDivElement;
 	settingsTab: FT_SettingTab; //UI
-	folderCreateModal: FT_FolderCreateModal;
 	templateInputModal: FT_TemplateInputModal;
+	folderCreateModal: FT_FolderCreateModal;
 
 	constructor(app: App, manifest: PluginManifest) {
 		super(app, manifest);
@@ -270,10 +270,13 @@ export default class FT_Plugin extends Plugin {
 	}
 
 	async createFolderIfNeeded(folder: string) {
-		if (this.checkIfFolderExists(folder)) return;
+		if (!this.checkIfFolderExists(folder)){
+			await this.folderCreateModal.createDirectory(folder)
+			return;
+		}
 
-		if (!(await this.folderCreateModal.createDirectory(folder)))
-			throw new Error("Folder creation cancelled by user");
+		// if (!)
+		// 	throw new Error("Folder creation cancelled by user");
 	}
 
 	getCurrentSelection(editor?: Editor): string {
@@ -302,6 +305,15 @@ export default class FT_Plugin extends Plugin {
 		}
 	}
 
+	openFile(file: TFile, mode: 'current' | 'tab' | 'split'){
+		if(mode === 'current'){
+			this.app.workspace.getLeaf(false).openFile(file);
+			return;
+		}
+		
+		this.app.workspace.getLeaf(mode).openFile(file);
+	}
+
 	/**
 	 * Loads plugin settings from Obsidian's persisted plugin data and merges them
 	 * with the default configuration.
@@ -321,8 +333,10 @@ export default class FT_Plugin extends Plugin {
 			templateDirectoryPath: "templates", //Template Directory
 			selectionReplacementPolicy: "always", //Replace Selection
 			outputNoteHandling: "open-tab", //Create and Open Note
-			outputDirectoryPath: "", //Default output Directory
-			outputFilenameTemplate: "{{title}}", //Default Template Name
+			temptativeOutputFolder: "", //Default output Directory
+			temptativeFileName: "{{title}}", //Default Template Name
+			outputDirectory: "", //Efective Directory - if temptativeOutputFolder is a template, this is the final"resolved" value.
+			outputFileName: "", //Efective Filename - if temptativeFileName is a template, this is the final "resolved" value.
 			selectionReplacementTemplates: "{{title}}", //Default Replacement String
 			rawInputFieldList: "title,body", // Default Field List
 			inputSplitPattern: "\\s+-\\s+", // Selection Split

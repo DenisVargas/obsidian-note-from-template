@@ -3,7 +3,7 @@
 /* -------------------------------------------------------------------------- */
 
 export type Ok<T> = {
-	ok: true;
+	ok:true;
 	value: T;
 };
 export type Err<E extends Error> = {
