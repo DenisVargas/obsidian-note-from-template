@@ -295,22 +295,20 @@ export class FT_TemplateProcessor {
 			throw new Error(`Template id '${templateId}' is not loaded in cache`)
 		}
 
-		const { id, name: name, path } = cached.meta;
 		const render = cached.compiledTemplate;
-		// const { frontmatter, template_settings, body } = cached.rawData; //Aviable just in case.
+
+		//* AVIABLE
+		// const { id, name: name, path } = cached.meta;
+		// const { frontmatter, template_settings, body } = cached.rawData;
 
 		/* ------------------------ Text (Editor) Replacement ----------------------- */
-		//TODO:T2 Esto deberia hacerse antes de abrir el archivo, para evitar errores.
-		//At this point, we already have the file created if needed, only need to resolve insertion/replacement.
-		//Here we should replace editor selection for compatibility with current version.
-		//For text replacement, we should reconstruct it somehow.
+
 		if (finalSettings.selectionReplacementPolicy && finalSettings.editorReference) {
-			//Issue1
-			//Esta funcionalidad lo que hace realmente es reemplazar una seleccion por un enlace al nuevo archivo creado.
-			
-			// await this.insertFromTemplate(executeResult, replacementOptions)
 			console.debug("Should replace selection");
-			// editor.replaceSelection(finalOutput);
+			const editor = finalSettings.editorReference;
+			const replaceMentTemplate = compile(editor.getSelection());
+			const replaced = replaceMentTemplate(finalSettings.textReplacement_data);
+			editor.replaceSelection(replaced);
 		}
 
 		//TODO: Implement [MODE] for distintion between insertion and new File Creation.
@@ -319,32 +317,29 @@ export class FT_TemplateProcessor {
 		try {
 			const targetPath = finalSettings.outputDirectory;
 			const targetFileName = finalSettings.outputFileName;
-			// This final output, is generated from input and the cached pre-compiled handlebars template
-			const finalOutput: string = render(inputData); //* OK
-			// console.log("Result Output is:");
-			// console.log(finalOutput);
-			let resultFile: TFile; //The new File created as a vault file reference.
-			
+			const OutputFileContent: string = render(inputData); //* OK
+
 			//?: Should create a new file and place the rendered content as body.
+			let resultFile: TFile; //The new File created as a vault file reference.
 			switch(finalSettings.outputNoteHandling){
 				case "none":
 					console.log("Dont Create");
 					//By default it doesnt do anything if you dont replace selection.
 					//This functionality should be replaced by insertion mode.
-					return;				
+					return;
 				case "create":
-					resultFile = await this.newVaultFile(finalOutput, targetPath, targetFileName);
+					resultFile = await this.newVaultFile(OutputFileContent, targetPath, targetFileName);
 					return;
 				case "open":
-					resultFile = await this.newVaultFile(finalOutput, targetPath, targetFileName);
+					resultFile = await this.newVaultFile(OutputFileContent, targetPath, targetFileName);
 					this._plugin.openFile(resultFile,'current');
 					return
 				case "open-tab":
-					resultFile = await this.newVaultFile(finalOutput, targetPath, targetFileName);
+					resultFile = await this.newVaultFile(OutputFileContent, targetPath, targetFileName);
 					this._plugin.openFile(resultFile,'tab');
 					return
 				case "open-pane":
-					resultFile = await this.newVaultFile(finalOutput, targetPath, targetFileName);
+					resultFile = await this.newVaultFile(OutputFileContent, targetPath, targetFileName);
 					this._plugin.openFile(resultFile,'split');
 					return;
 				default:

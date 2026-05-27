@@ -63,7 +63,7 @@ export class FT_TemplateInputModal extends Modal {
 	private _settings?: ExtendedSettings;
 	private _busAbort = new AbortController();
 	private _status: TemplateStatusView;
-	private _fields: Record<string, string>;
+	private _fields: Map<string,TemplateField>;
 
 	/* ------------------------- Dynamic Path Resolution ------------------------ */
 	private _destinationInfoElement?: HTMLElement;
@@ -81,13 +81,12 @@ export class FT_TemplateInputModal extends Modal {
 	private _destinationInfoRenderPath?: (data:Record<string,unknown>) => string;
 
 	private _fieldElements: HTMLElement[] = [];
-	private _fieldSettings: TemplateField[] = [];
 
 	constructor(plugin: FT_Plugin) {
 		super(plugin.app);
 		this._plugin = plugin;
 		this._status = new TemplateStatusView(this.modalEl, this.contentEl);
-		this._fields = {};
+		this._fields = new Map;
 
 		// Command Trigger Stage -> Input Gathering Stage
 		this._plugin.eventBus.addEventListener(
@@ -382,10 +381,6 @@ export class FT_TemplateInputModal extends Modal {
 			// - Aplica foco automático al primer campo para optimizar el flujo de entrada al abrir el modal.
 			// - Habilita atajos Mod+1..9 para salto directo y muestra la ayuda visual del atajo en la columna derecha.
 
-			//TODO: Construir un Record<string,string> que contenga, los valores resueltos para cada campo.
-			// Requisito para replacement.
-			
-
 			const controlEl = this.contentEl.createEl("div", {
 				cls: "from-template-control-row",
 			});
@@ -416,6 +411,8 @@ export class FT_TemplateInputModal extends Modal {
 				focusNextField,
 				index //! Should use field.id instead xd.
 			)
+
+			this._fields.set(field.id, field);
 
 			this._fieldElements.push(element);
 			const keyEl = controlEl.createEl("div", {
@@ -642,6 +639,8 @@ export class FT_TemplateInputModal extends Modal {
 					new Notice("Destination Path is not resolved yet");
 					return;
 				}
+
+				finalSettings.fields = this._fields;
 
 				this._plugin.eventBus.dispatchEvent(
 					new ExecuteTemplateEvent({

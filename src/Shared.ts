@@ -236,7 +236,7 @@ export interface iFT_ExecutionSettings extends iFT_PluginSettings {
 	templateProperties: Record<string, unknown>;
 	
 	/** Ordered list of fields declared in the template, used to build the input UI. */
-	fields: TemplateField[]; //TODO: Esto tiene que ir a GlobalSettings.
+	fields: Map<string,TemplateField>;
 
 	/** Handlebars template string for replacing the active editor selection on submit. */
 	// textReplacement_Pattern: string;
@@ -321,11 +321,11 @@ export class ExtendedSettings implements iFT_ExecutionSettings {
 	/**
 	 * Parsed fields extracted from {@link rawInputFieldList}
 	 */
-	fields: TemplateField[]; //TODO: Esto tiene que reemplazarse.
+	fields: Map<string, TemplateField>;
 	/**
 	 * Consumed by UI to display an Input per field as Record<string,string>
 	 */
-	textReplacement_data: Record<string, string>; //TODO: replace by input.
+	textReplacement_data: Record<string, string>;
 	/** 
 	 * Enables or disables the UI Replacement Section
 	 */
@@ -403,7 +403,7 @@ export class ExtendedSettings implements iFT_ExecutionSettings {
 
 		this.templateFileContent = ""; //TODO: Cual es su default? Proximo a deprecar
 		this.templateProperties = {}; //TODO: Cual es su default? Proximo a deprecar
-		this.fields = []; //TODO: deprecar.
+		this.fields = new Map();
 		this.textReplacement_Pattern = ""; //TODO: deprecar: use [selectionReplacementTemplates[0]]
 		this.textReplacement_data = {}; //TODO: deprecar:
 
