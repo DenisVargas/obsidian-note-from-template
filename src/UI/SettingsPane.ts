@@ -118,7 +118,7 @@ export class FT_SettingTab extends PluginSettingTab {
 				.addDropdown((toggle) =>
 					toggle
 						.addOption("always", "Always")
-						.addOption("sometimes", "If Selected")
+						.addOption("selected-only", "If Selected")
 						.addOption("never", "Never")
 						.setValue(pluginSettings.selectionReplacementPolicy)
 						.onChange(async (value) => {
@@ -145,22 +145,9 @@ export class FT_SettingTab extends PluginSettingTab {
 						}),
 				);
 			new Setting(containerEl)
-				.setName("Default output directory")
+				.setName("Default Output Filename")
 				.setDesc(
-					'Where to put notes if they have not specified with {{template-output}}, Default value is "/" (Your Vault\'s root)',
-				)
-				.addText((text) =>
-					text
-						.setValue(pluginSettings.temptativeOutputFolder)
-						.onChange(async (value: string) => {
-							pluginSettings.temptativeOutputFolder = value;
-							await this.plugin.saveSettings();
-						}),
-				);
-			new Setting(containerEl)
-				.setName("Default template filename")
-				.setDesc(
-					"What to call notes if they have not specified {{template-filename}}",
+					"What to call notes if they have not specified {{template-filename}}.",
 				)
 				.addText((text) =>
 					text
@@ -168,6 +155,19 @@ export class FT_SettingTab extends PluginSettingTab {
 						.setValue(pluginSettings.temptativeFileName)
 						.onChange(async (value) => {
 							pluginSettings.temptativeFileName = value;
+							await this.plugin.saveSettings();
+						}),
+				);
+			new Setting(containerEl)
+				.setName("Default Output Directory")
+				.setDesc(
+					'Where to put notes if they have not specified with {{template-output}}, Default value is "" (Your Vault\'s root)',
+				)
+				.addText((text) =>
+					text
+						.setValue(pluginSettings.temptativeOutputFolder)
+						.onChange(async (value: string) => {
+							pluginSettings.temptativeOutputFolder = value;
 							await this.plugin.saveSettings();
 						}),
 				);

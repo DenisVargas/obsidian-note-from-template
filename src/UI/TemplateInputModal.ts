@@ -1,7 +1,6 @@
 /**
  * Template input modal for collecting user data before template execution.
  */
-
 import {
 	Modal,
 	Setting,
@@ -10,11 +9,10 @@ import {
 	ToggleComponent,
 	DropdownComponent,
     Notice,
+	KeymapEventHandler,
 } from "obsidian";
 import FT_Plugin from "../main.js";
 import {
-	BAD_CHARS_FOR_FILENAMES_MATCH,
-	BAD_CHARS_FOR_FILENAMES_TEXT,
 	FT_DomEventId,
 	ExecuteTemplateEvent,
 	OpenInputModalEvent,
@@ -23,31 +21,12 @@ import {
 	type TemplateField,
     TemplateCacheEntry,
 } from "../Shared.js";
-import { DateTime } from "luxon";
-import { LinkSuggest, TagSuggest, TemplateStatusView } from "./utils.js";
+import { FT_BuildInFields } from "../BuildIn.js";
+//TODO import { DateTime } from "luxon";
+import { LinkSuggest, overrideVaultFileName, TagSuggest, TemplateStatusView } from "./utils.js";
 import { capitalize, parseCsvStringList } from "../utils.js";
 import { FT_TemplateProcessor } from "../TemplateProcessing.js";
-
-type inputControlType = "area" | "text" | "note-title" | "choice" | "multi" | "currentDate";
-
-// Pre-defined fields with default properties.
-const defaultFields: Record<string, TemplateField> = {};
-defaultFields["body"] = {
-	id: "body",
-	inputType: "area",
-	args: [""],
-	description: "The Note's content"
-}
-defaultFields["title"] = {
-	id: "title",
-	inputType: "text",
-	args: ["Cool Title"],
-	description: "Main Title"
-}
-//Special fields: Aviable for "Replace" but cannot be overwritten (doesnt generate UI Input Fields)
-const specialFields: string[] = [
-	"templateResult"
-];
+import { computedRef, Computed, ref, Reactive } from "./Signals.js";
 
 /**
  * Modal dialog that collects user input for filling out a template before writing the generated note.
@@ -63,16 +42,26 @@ export class FT_TemplateInputModal extends Modal {
 	private _settings?: ExtendedSettings;
 	private _busAbort = new AbortController();
 	private _status: TemplateStatusView;
+
 	private _fields: Map<string,TemplateField>;
+	private _fieldElements: HTMLElement[] = [];
+	
+	/* ----------------------------- Field Shortcuts ---------------------------- */
+
+	private _fieldShortcutHandlers: KeymapEventHandler[] = [];
 
 	/* ------------------------- Dynamic Path Resolution ------------------------ */
-	private _destinationInfoElement?: HTMLElement;
+
+	private _destination: Computed<string>;
+	private _nameRef: Reactive<string>;
+	private _pathRef: Reactive<string>;
+	private _destinationUnsubscribe?: () => void;
 	
 	private _mustResolveName:boolean = false;
 	private _nameIsResolved:boolean = false;
 	private _nameTemplate?: string;
 	private _destinationInfoNameFields?: Record<string,string>;
-	private _destinationInfoRenderName?: (data:Record<string,unknown>) => string;
+	private _destinationInfo_RenderName?: (data:Record<string,unknown>) => string;
 	
 	private _mustResolvePath:boolean = false;
 	private _pathIsResolved: boolean = false;
@@ -80,13 +69,19 @@ export class FT_TemplateInputModal extends Modal {
 	private _destinationInfoPathFields?: Record<string,string>;
 	private _destinationInfoRenderPath?: (data:Record<string,unknown>) => string;
 
-	private _fieldElements: HTMLElement[] = [];
+	/* -------------------------------------------------------------------------- */
 
 	constructor(plugin: FT_Plugin) {
 		super(plugin.app);
 		this._plugin = plugin;
 		this._status = new TemplateStatusView(this.modalEl, this.contentEl);
 		this._fields = new Map;
+		this._nameRef = ref("");
+		this._pathRef = ref("");
+		this._destination = computedRef(
+			[this._pathRef, this._nameRef],
+			() => `${this._pathRef.value}/${this._nameRef.value}.md`,
+		);
 
 		// Command Trigger Stage -> Input Gathering Stage
 		this._plugin.eventBus.addEventListener(
@@ -106,6 +101,8 @@ export class FT_TemplateInputModal extends Modal {
 	}
 
 	destroy(): void {
+		this._destinationUnsubscribe?.();
+		this._destination.destroy();
 		this._busAbort.abort();
 	}
 
@@ -115,7 +112,12 @@ export class FT_TemplateInputModal extends Modal {
 		const { contentEl, titleEl } = this;
 		titleEl.empty(); //Garbage Collected
 		contentEl.empty(); //Garbage Collected
+		this._destinationUnsubscribe?.();
+		this._destinationUnsubscribe = undefined;
 		this._settings = undefined;
+		this.clearFieldShortcuts();
+		this._fieldElements = [];
+		this._fields = new Map();
 	}
 
 	preRender(): void {
@@ -132,7 +134,7 @@ export class FT_TemplateInputModal extends Modal {
 		
 		// Reset State, just in case.
 		this._destinationInfoNameFields = {};
-		this._destinationInfoRenderName = undefined;
+		this._destinationInfo_RenderName = undefined;
 		this._destinationInfoPathFields = {};
 		this._destinationInfoRenderPath = undefined;
 		
@@ -148,7 +150,7 @@ export class FT_TemplateInputModal extends Modal {
 			}else{
 				const {fieldNames, render} = res.value;
 				this._destinationInfoNameFields = fieldNames;
-				this._destinationInfoRenderName = render;
+				this._destinationInfo_RenderName = render;
 			}
 		} else {
 			this._settings.outputFileName = this._settings.temptativeFileName;
@@ -160,6 +162,7 @@ export class FT_TemplateInputModal extends Modal {
 			console.info("Directory must be resolved");
 			this._pathTemplate = this._settings.temptativeOutputFolder;
 			this._pathIsResolved = false;
+			
 			const res = this._processor.prepareTemplate(this._pathTemplate);
 			if (!res.ok) {
 				console.error(res.error);
@@ -172,6 +175,10 @@ export class FT_TemplateInputModal extends Modal {
 			this._settings.outputDirectory = this._settings.temptativeOutputFolder;
 		}
 
+		// Sync reactive refs with current output values before rendering UI.
+		this._nameRef.value = this._settings.outputFileName || this._settings.temptativeFileName;
+		this._pathRef.value = this._settings.outputDirectory || this._settings.temptativeOutputFolder;
+
 		//A nice Builder Pattern Here
 		this.addHeader()
 			.addBody()
@@ -180,6 +187,9 @@ export class FT_TemplateInputModal extends Modal {
 				.addReplacementSection()
 				.addCreateOpenSection()
 				.addSubmitSection();
+
+		//Register Field Shortcuts & focus first field
+		this.registerFieldShortcuts();
 	}
 
 	addHeader(): this {
@@ -239,11 +249,15 @@ export class FT_TemplateInputModal extends Modal {
 			cls: "from-template-control-column",
 		});
 
+		// this._destination = new Reactive(`${this._settings?.temptativeOutputFolder}/${this._settings?.temptativeFileName}.md`);
 		const destinationField = destinationValueContainer.createSpan({
-			text: `${this._settings?.temptativeOutputFolder}/${this._settings?.temptativeFileName}.md`,
+			text: this._destination.value,
 			cls: ["from-template-subcontrol", "from-template-code-span"],
 		});
-		this._destinationInfoElement = destinationField;
+		this._destinationUnsubscribe?.();
+		this._destinationUnsubscribe = this._destination.subscribe(value => {
+			destinationField.setText(value);
+		});
 
 		destinationRow
 			.createDiv({
@@ -260,14 +274,13 @@ export class FT_TemplateInputModal extends Modal {
 	}
 
 	addFieldsSection(): this {
-		//TODO: FIX THIS
+		//TODO: There is a blocking between enter & shortcuts.
 		const settings = this._settings;
 		if (!settings) return this;
 
-		/**
-		 * Updates the template data field and triggers dynamic name/path resolution.
-		 * 
-		 * EXTERNAL DEPENDENCIES (Side-effects):
+		/*
+		 !Not a good idea to extract from here.
+		 * - EXTERNAL DEPENDENCIES (Side-effects):
 		 * - settings: Modified directly (from addFieldsSection scope)
 		 * - this._status: Calls setNeutral() (modifies UI state)
 		 * - this._settings: Read/Modified (instance property)
@@ -280,10 +293,13 @@ export class FT_TemplateInputModal extends Modal {
 		 * - this._pathTemplate: Read (instance property)
 		 * - this._destinationInfoRenderPath: Executed (function from instance)
 		 * - this._pathIsResolved: Modified (instance flag set to true)
-		 * - this._destinationInfoElement: Modified (setText called on element)
+		 * - this._nameRef/_pathRef: Modified (reactive destination dependencies)
+		*/
+		/**
+		 * Updates the template data field and triggers dynamic name/path resolution.
 		 */
-		const updateValue = (id: string, value: string) => {
-			settings.textReplacement_data[id] = value;
+		const updateFieldValue = (id: string, newValue: string, oldValue: string) => {
+			settings.textReplacement_data[id] = newValue;
 			this._status.setNeutral();
 
 			if(!this._settings) return;
@@ -291,44 +307,46 @@ export class FT_TemplateInputModal extends Modal {
 			/* -------------------------------------------------------------------------- */
 			/*                        DINAMIC DESTINATION PATH/NAME                       */
 			/* -------------------------------------------------------------------------- */
-
+			
 			// Dinamic Resolution of Output File Name.
 			//!Warning: This might require multiple fields, if tempalte has more than just {{title}} or similar.
-			if(this._mustResolveName && this._destinationInfoNameFields && this._nameTemplate && this._destinationInfoRenderName){
-
+			if(this._mustResolveName && this._destinationInfoNameFields && this._nameTemplate && this._destinationInfo_RenderName){
+				
 				/** If current field is part of _destinationInfoNameFields */
 				const isPartOfName = this._destinationInfoNameFields[id] != undefined;
 				if(isPartOfName){
+
+					let validName = newValue;
+					const attempt = overrideVaultFileName(newValue);
+					if(!attempt.ok && attempt.error.cause.current){
+						//Drop a notification to the user, use normalized value instead.
+						new Notice(attempt.error.message);
+						validName = attempt.error.cause.current;
+					}
+
 					//First we fill the apropiate destinationField
-					this._destinationInfoNameFields[id] = value;
+					this._destinationInfoNameFields[id] = validName;
 					console.log("Destination name fields is resolved as\n", this._destinationInfoNameFields);
 
-					const name = this._destinationInfoRenderName(this._destinationInfoNameFields);
+					const name = this._destinationInfo_RenderName(this._destinationInfoNameFields);
 					this._settings.outputFileName = name;
+					this._nameRef.value = name;
 					console.log(`Resolved name is: ${name}`);
 					this._nameIsResolved = true;
-				} 
+				}
 				// else console.log("is Not part of Name apparently"); // Debugging.
 			}
-			// else { //! Could lead to problems.
-			// 	this._settings.outputFileName = this._settings.temptativeFileName;
-			// }
 
 			//Resolve path
 			if( this._mustResolvePath && this._pathTemplate){
 				let path = this._pathTemplate;
 				if(this._destinationInfoRenderPath){
-					path = this._destinationInfoRenderPath({[id]:value});
+					path = this._destinationInfoRenderPath({[id]:newValue});
 					console.log(`Resolved path is: ${path}`);
 					this._pathIsResolved = true;
 				}
 				this._settings.outputDirectory = path;
-			}
-
-			if(this._mustResolvePath || this._mustResolveName){
-				const path = this._settings.outputDirectory;
-				const name = this._settings.outputFileName;
-				this._destinationInfoElement?.setText(`${path}/${name}.md`);
+				this._pathRef.value = path;
 			}
 		};
 		const focusNextField = (index:number) =>{
@@ -345,33 +363,27 @@ export class FT_TemplateInputModal extends Modal {
 		//At this stage templateConfig.fields is still undefined, so we have to construct it.
 		// * Fields is our input for the next stage!
 		const parsedFields = parseCsvStringList(settings.rawInputFieldList);
-		
+
 		parsedFields.forEach((parsedField, index) => {
-			const defaultType: inputControlType  = "text";
-			if(specialFields.contains(parsedField)) return;
 
 			const field: TemplateField = {
 				id: parsedField,
-				inputType: defaultType
+				value:"",
+				inputType: "text"
 			}
 
-			// Allows us to fill defaults easily.
-			const defaultField = defaultFields[parsedField];
-			if (defaultField) {
-				// Iterate over the keys of the defaultField object.
-				for (const key of Object.keys(defaultField) as (keyof TemplateField)[]) {
-					// Check if the value in defaultField is not undefined.
-					const value = defaultField[key];
-					if (value !== undefined) {
-						// Handle both string and string[] cases explicitly.
-						if (typeof value === "string" || Array.isArray(value)) {
-							field[key] = value as TemplateField[typeof key];
-						}
-					}
-				}
-			}
+			if(FT_BuildInFields.has(parsedField)){
+				const defaultField: TemplateField = FT_BuildInFields.get(parsedField)!;
 
-			// const data: Record<string, string> = { [field.id]: field.id };
+				field.value = defaultField.value;
+				field.inputType = defaultField.inputType;
+				field.args = defaultField.args;
+				field.description = defaultField.description;
+				field.alternatives = defaultField.alternatives;
+				field.replaceOnly = defaultField.replaceOnly;
+			}
+			
+			if(field.inputType === "no-render") return;
 
 			// En los siguientes bloques:
 			// - Construye la fila de UI de cada campo: etiqueta (nombre y descripción) + contenedor del control.
@@ -407,7 +419,7 @@ export class FT_TemplateInputModal extends Modal {
 				controlWrapper,
 				field,
 				// data, //! Use field.
-				updateValue,
+				updateFieldValue,
 				focusNextField,
 				index //! Should use field.id instead xd.
 			)
@@ -422,7 +434,7 @@ export class FT_TemplateInputModal extends Modal {
 				if (index === 0) element.focus();
 				element.addClass("from-template-control");
 				if (index <= 8) {
-					this.scope.register(["Mod"], `${index + 1}`, () => this.selectField(index));
+					// this.scope.register(["Mod"], `${index + 1}`, () => this.selectField(index));
 					keyEl.createEl("div", {
 						text: `${index + 1}`,
 						cls: "from-template-shortkey",
@@ -500,9 +512,10 @@ export class FT_TemplateInputModal extends Modal {
 				cls: ["from-template-inline-code-button"],
 			});
 			button.onClickEvent(() => {
-				replacementText.setValue(
-					replacementText.getValue() + `{{${fieldName}}}`,
-				);
+				const token = `{{${fieldName}}}`;
+				const currentValue = replacementText.getValue();
+				if (currentValue.includes(token)) return;
+				replacementText.setValue(currentValue + token);
 				options.textReplacement_Pattern = replacementText.getValue();
 			});
 		});
@@ -683,7 +696,7 @@ export class FT_TemplateInputModal extends Modal {
 	createInputControl(
 		controlEl: HTMLElement, // Root Element.
 		field: TemplateField,
-		UpdateFieldValue: (k: string, v: any) => void,
+		UpdateFieldValue: (key: string, newValue: any, oldValue:any) => void,
 		ProceedToNextField: (i:number) => void,
 		index: number
 	): HTMLElement {
@@ -696,22 +709,20 @@ export class FT_TemplateInputModal extends Modal {
 			switch (inputType) {
 				case "text": {
 					// console.log(`Modifing ${name} with default ${initial}`);
-					const value = field.args ?  field.args[0] : "";
-					
-					const update = (value: string) => {
-						console.debug(`${name} field has changed to ${value}`);
-						UpdateFieldValue(name, value)
-					};
-
+					const defaultValue = field.args ?  field.args[0] : "";
 					const textComponent = new TextComponent(controlEl)
-						.setValue(value)
-						.onChange(update);
+						.setValue(defaultValue)
+						.onChange((newValue: string) => {
+							console.log("currentValue:");
+							console.log(textComponent.getValue());
+							UpdateFieldValue(name, newValue, newValue)
+						});
 					textComponent.inputEl.size = 50;
-					
+						
 					textEl = textComponent.inputEl;
 					textEl.onkeydown = (ev:KeyboardEvent) => {
 						if(ev.code === "Enter"){
-							UpdateFieldValue(name,textComponent.getValue());
+							UpdateFieldValue(name,textComponent.getValue(), "");
 							ProceedToNextField(index);
 						}
 					}
@@ -722,7 +733,7 @@ export class FT_TemplateInputModal extends Modal {
 					// }
 					//Run when element is given the focus.
 					// textEl.onfocus = (ev) => {
-					// 	console.log("HE GANADO EL FOCO NIGGA");
+					// 	console.log("Element Focused");
 					// }
 					//! don't use OnClic only.
 					// textEl.onClickEvent((ev) => {
@@ -731,8 +742,8 @@ export class FT_TemplateInputModal extends Modal {
 
 					if (this._plugin.settings?.enableInputSuggestions) {
 						if (name === "tags")
-							new TagSuggest(textEl as HTMLInputElement, this.app, update);
-						else new LinkSuggest(textEl as HTMLInputElement, this.app, update);
+							new TagSuggest(textEl as HTMLInputElement, this.app, ()=>{ UpdateFieldValue(name, defaultValue, "") });
+						else new LinkSuggest(textEl as HTMLInputElement, this.app, ()=>{ UpdateFieldValue(name, defaultValue, "") });
 					}
 					return textEl;
 				}
@@ -742,7 +753,7 @@ export class FT_TemplateInputModal extends Modal {
 
 					const textAreaEl = new TextAreaComponent(controlEl)
 						.setValue(value)
-						.onChange((value) => UpdateFieldValue(name, value));
+						.onChange((value) => UpdateFieldValue(name, value, "")); //TODO: Fix oldValue
 					textAreaEl.inputEl.rows = 5;
 					const areaEl = textAreaEl.inputEl;
 					areaEl.onkeydown = (ev:KeyboardEvent) =>{
@@ -756,6 +767,8 @@ export class FT_TemplateInputModal extends Modal {
 					// }
 					return textAreaEl.inputEl;
 				}
+
+				//TODO: make sure that filename is valid.
 
 				//! Deprecated in favor of arbitrary fields. Look for "Dynamic Output Name".
 				// case "note-title": {
@@ -794,7 +807,7 @@ export class FT_TemplateInputModal extends Modal {
 					const dropDown = new DropdownComponent(controlEl)
 						.addOptions(opts)
 						.setValue(value)
-						.onChange((value) => UpdateFieldValue(name, value));
+						.onChange((value) => UpdateFieldValue(name, value, ""));
 					return dropDown.selectEl;
 				}
 
@@ -809,16 +822,17 @@ export class FT_TemplateInputModal extends Modal {
 						new ToggleComponent(d).setTooltip(f).onChange((value) => {
 							if (value) selected.push(f);
 							else selected.remove(f);
-							UpdateFieldValue(name, selected.join(", "));
+							UpdateFieldValue(name, selected.join(", "),"");
 						});
 					});
 					return spanEl;
 				}
 	
-				//* This is a special case, use {{date}} instead
+				//TODO: This is a special case, use {{date}} instead
+				//Special cases {{date}}{{date&time}} standart obsidian types
 				// For inserting today use {{today}}
 				// For inserting current hour use {{now}}
-				// Combining you can combine them like this: "{{today}}:{{now}}"
+				// Combining you can combine them like this: "{{today}}{{now}}"
 				// Or use {{date:format}}
 
 				// case "currentDate": {
@@ -838,5 +852,23 @@ export class FT_TemplateInputModal extends Modal {
 
 		return new HTMLDivElement();
 	}
-}
 
+	private registerFieldShortcuts(): void {
+		this.clearFieldShortcuts(); // limpia anteriores antes de registrar
+
+		for (let index = 0; index < 9; index++) {
+			const handler = this.scope.register(["Mod"], `${index + 1}`, () => {
+				const element = this._fieldElements[index];
+				if (!element || !element.isConnected) return;
+				element.focus();
+			});
+			this._fieldShortcutHandlers.push(handler);
+		}
+	}
+	private clearFieldShortcuts(): void {
+		for (const handler of this._fieldShortcutHandlers) {
+			this.scope.unregister(handler);
+		}
+		this._fieldShortcutHandlers = [];
+	}
+}

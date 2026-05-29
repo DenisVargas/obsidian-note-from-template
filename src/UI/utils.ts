@@ -9,6 +9,12 @@ import {
 	type SearchResult,
 	prepareFuzzySearch,
 } from "obsidian";
+import {
+	Success,
+	Failed,
+	OverrideResult,
+	OverrideOption
+} from "../ErrorHandling.js"
 
 export class TemplateStatusView {
 	private readonly statusEl: HTMLElement;
@@ -176,3 +182,84 @@ export class ContentEditableTest extends Modal {
     }
 }
 */
+
+/**
+ * Validates whether a tentative vault file name contains illegal characters.
+ *
+ * Returns a successful override result with the original name when valid.
+ * Returns a failed override result when invalid, including the attempted value
+ * in the error cause for downstream diagnostics.
+ *
+ * Illegal characters: : [ ] ? / \\
+ *
+ * @param temptativeFileName Candidate file name to validate.
+ * @returns OverrideResult<string> success with the original name, or failure with context.
+ *
+ * @example
+ * const ok = overrideVaultFileName("Daily Note");
+ * if (ok.ok) console.log(ok.value);
+ *
+ * @example
+ * const fail = overrideVaultFileName("Daily:Note");
+ * if (!fail.ok) console.log(fail.error.cause.attempted);
+ */
+export function overrideVaultFileName(temptativeFileName:string): OverrideResult<string> {
+	const BAD_CHARS_FOR_FILENAMES_TEXT = ":[]?/\\";
+	const BAD_CHARS_FOR_FILENAMES_MATCH = /[:[\]?/\\]/g;
+
+	//const exp = new RegExp(BAD_CHARS_FOR_FILENAMES_MATCH);
+	// const containsIllegalCharacters = exp.test(temptativeFileName);
+	const matches = Array.from(
+		temptativeFileName.matchAll(BAD_CHARS_FOR_FILENAMES_MATCH),
+		(match) => ({
+			char:match[0],
+			index: match.index ?? -1
+		})
+	);
+
+	if(matches.length > 0){
+
+		const matchedCharacter = matches[0].char;
+		/*
+			We replace bad characters, collapse duplicates and trim.
+			"hello:world" -> "hello_world"
+			"a/b?c[d]\\e" -> "a_b_c_d_e"
+		*/
+		const normalized = temptativeFileName
+			.replace(BAD_CHARS_FOR_FILENAMES_MATCH, "_")
+			.replace(/_+/g, "_")
+			.replace(/^_+|_+$/g, "")
+			.trim();
+		
+		const overrideParams: OverrideOption<string> = {
+			current: normalized,
+			attempted: temptativeFileName
+		}
+
+		return Failed(`Do not use ${matchedCharacter}, the following characters are forbidden for filenames: ${BAD_CHARS_FOR_FILENAMES_TEXT}`, overrideParams);
+	}
+	
+	return Success(temptativeFileName);
+}
+/**
+ * Attempts to validate a file name and falls back to a default value on failure.
+ *
+ * This helper never returns a failed result: when validation fails, it returns
+ * `Success(defaultValue)`.
+ *
+ * @param temptativeFileName Candidate file name to validate.
+ * @param defaultValue Fallback value used when validation fails.
+ * @returns OverrideResult<string> always in the success branch.
+ */
+export function overrideVaultFileNameOrDefault(temptativeFileName:string, defaultValue:string): OverrideResult<string> {
+	const attempt = overrideVaultFileName(temptativeFileName);
+
+	if(!attempt.ok)
+		return Success(defaultValue);
+
+	return attempt;
+}
+//? Should we Validate paths also?
+// export function validateVaultPath(TemptativePath:string): boolean{
+// 	return true;
+// }

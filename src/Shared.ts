@@ -9,8 +9,6 @@ import { compile } from "handlebars";
 /*
  * Shared definitions/constants
  */
-export const BAD_CHARS_FOR_FILENAMES_TEXT = ":[]?/\\";
-export const BAD_CHARS_FOR_FILENAMES_MATCH = /[:[\]?/\\]/g;
 export const BAD_CHARS_FOR_PATHS_MATCH = /[:[\]?\\]/g;
 
 // Which are the YAML fields used by the template system
@@ -29,6 +27,15 @@ export const TEMPLATE_FIELDS = [
 //* Replaces [shouldReplaceSelection]
 export type ReplacementStrategy = "always" | "selected-only" | "never";
 export type CreateType = "none" | "create" | "open" | "open-pane" | "open-tab";
+export type TemplateInputType =
+| "text"
+| "area"
+| "note-title"
+| "choice"
+| "multi"
+| "currentDate"
+| "no-render"
+| (string & {});
 
 //! Deprecated: Included within ExtendedSettings
 // /*
@@ -80,8 +87,8 @@ export interface TemplateResult {
  * 
  * @see https://github.com/mo-seph/obsidian-note-from-template#field-types
  */
-export interface TemplateField {
-    [key: string]: string | string[] | undefined;
+export type TemplateField = {
+    [key: string]: string | string[] | boolean | undefined;
     /**
      * Unique identifier for this field within the template.
      * First segment of the field declaration. Used as the key in `textReplacement_data`
@@ -89,6 +96,9 @@ export interface TemplateField {
      * @example "title", "body", "tags"
      */
     id: string;
+
+	//? The idea here is to use this to contain the final value.
+	value: string;
 
     /**
      * Determines which input control is rendered for this field in the modal.
@@ -99,8 +109,9 @@ export interface TemplateField {
      * - `"choice"` — Dropdown with options from {@link args}
      * - `"multi"` — Toggle group with options from {@link args}
      * - `"currentDate"` — Auto-filled with current date, format from {@link args}[0]
+	 * - `"no-render"` — Updated via code, does not generate ui-fields.
      */
-    inputType: string;
+    inputType: TemplateInputType;
 
     /**
      * Human-readable hint displayed below the field label in the input modal.
@@ -123,6 +134,9 @@ export interface TemplateField {
      * !Currently unused in active code paths.
      */
     alternatives?: string[];
+
+	//?: This does not generate an inputfield, but is listed on source text Replacement.
+	replaceOnly?: boolean;
 }
 export type TemplateRawData = {
 	frontmatter: Record<string, any>;

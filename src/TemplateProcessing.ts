@@ -304,11 +304,16 @@ export class FT_TemplateProcessor {
 		/* ------------------------ Text (Editor) Replacement ----------------------- */
 
 		if (finalSettings.selectionReplacementPolicy && finalSettings.editorReference) {
-			console.debug("Should replace selection");
+			const policy = finalSettings.selectionReplacementPolicy;
 			const editor = finalSettings.editorReference;
-			const replaceMentTemplate = compile(editor.getSelection());
-			const replaced = replaceMentTemplate(finalSettings.textReplacement_data);
-			editor.replaceSelection(replaced);
+			const selection = editor.getSelection();
+			console.log(`Current SElection is ${selection}\nPolicy set as ${policy}`);
+			if(policy === "always" || policy === "selected-only"){
+				console.debug("Should replace selection");
+				const replaceMentTemplate = compile(selection);
+				const replaced = replaceMentTemplate(finalSettings.textReplacement_data);
+				editor.replaceSelection(replaced);
+			}
 		}
 
 		//TODO: Implement [MODE] for distintion between insertion and new File Creation.
