@@ -2,6 +2,7 @@ import {
 	Plugin,
 	App,
 	TFolder,
+	Notice,
 	type Editor,
 	type PluginManifest,
 	type TFile,
@@ -55,7 +56,7 @@ export default class FT_Plugin extends Plugin {
 		const settings = await this.loadSettings(); //Explict load settings from disk
 		this.settings = settings;
 		this.addSettingTab(this.settingsTab);
-
+		
 		this.addCommand({
 			id: "reload",
 			name: "Re-index Templates",
@@ -63,6 +64,10 @@ export default class FT_Plugin extends Plugin {
 				this.indexTemplates(settings);
 			},
 		});
+		
+		if(!this.ensureTemplateDirectoryConfigured(settings)){
+			return;
+		}
 
 		// This pluggin does not depend on Layout ready, but i left this here just in case
 		// https://docs.obsidian.md/Reference/TypeScript+API/Workspace/onLayoutReady
@@ -76,11 +81,43 @@ export default class FT_Plugin extends Plugin {
 		console.log("unloading plugin");
 	}
 
+	private ensureTemplateDirectoryConfigured(settings: iFT_PluginSettings): boolean {
+		//If templateDirectoryPath is invalid or does not exists, prevent user to continue and open settings.
+		const folder = settings.templateDirectoryPath?.trim();
+		const isMissing = !folder;
+		const doesNotExist = folder ? !this.checkIfFolderExists(folder) : true;
+
+		if(isMissing){
+			new Notice(
+				"Template Directory is required. Configure it in the plugin settings before using Note From Template.",
+				8000,
+			);
+		}
+
+		if (doesNotExist) {
+			new Notice(
+				`Template Directory "${folder}" does not exist in the vault. Update it in the plugin settings before using Note From Template.`,
+				8000,
+			);
+		}
+		
+		if(isMissing || doesNotExist){
+			(this.app as any).setting.open();
+			(this.app as any).setting.openTabById(this.manifest.id);
+			return false;
+		}
+
+		return true;
+	}
+
 	// Adds all the template commands - calls getTemplates which looks for files in the settings.templateDirectoryPath
 	async indexTemplates(settings: iFT_PluginSettings) {
 		const processor = this.processor;
 
 		if (processor) {
+
+			this.ensureTemplateDirectoryConfigured(settings);
+
 			const loadResult = await processor.loadFromDefaultLocation(
 				this.templateInputModal,
 				settings,
