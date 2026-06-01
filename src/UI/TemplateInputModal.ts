@@ -27,6 +27,7 @@ import { LinkSuggest, overrideVaultFileName, TagSuggest, TemplateStatusView } fr
 import { capitalize, parseCsvStringList } from "../utils.js";
 import { FT_TemplateProcessor } from "../TemplateProcessing.js";
 import { computedRef, Computed, ref, Reactive } from "./Signals.js";
+import { OverrideError } from "../ErrorHandling.js";
 
 /**
  * Modal dialog that collects user input for filling out a template before writing the generated note.
@@ -360,38 +361,13 @@ export class FT_TemplateInputModal extends Modal {
 		/*                               FIELDS HANDLING                              */
 		/* -------------------------------------------------------------------------- */
 
-		//At this stage templateConfig.fields is still undefined, so we have to construct it.
 		// * Fields is our input for the next stage!
-		const parsedFields = parseCsvStringList(settings.rawInputFieldList);
+		console.debug("INCOMING FIELD MAP: \n", settings.fields);
+		this._fields = new Map(settings.fields); //Copia de settings.fields
 
-		parsedFields.forEach((parsedField, index) => {
-
-			const field: TemplateField = {
-				id: parsedField,
-				value:"",
-				inputType: "text"
-			}
-
-			if(FT_BuildInFields.has(parsedField)){
-				const defaultField: TemplateField = FT_BuildInFields.get(parsedField)!;
-
-				field.value = defaultField.value;
-				field.inputType = defaultField.inputType;
-				field.args = defaultField.args;
-				field.description = defaultField.description;
-				field.alternatives = defaultField.alternatives;
-				field.replaceOnly = defaultField.replaceOnly;
-			}
-			
+		let order = 0;
+		this._fields.forEach((field, fieldID) => {
 			if(field.inputType === "no-render") return;
-
-			// En los siguientes bloques:
-			// - Construye la fila de UI de cada campo: etiqueta (nombre y descripción) + contenedor del control.
-			// - Vincula metadatos del campo con la presentación (capitalize del id, htmlFor y clases CSS).
-			// - Delega la creación del input al factory createInputControl según el tipo de campo.
-			// - Registra cada elemento en fieldElements para soportar navegación por foco entre campos.
-			// - Aplica foco automático al primer campo para optimizar el flujo de entrada al abrir el modal.
-			// - Habilita atajos Mod+1..9 para salto directo y muestra la ayuda visual del atajo en la columna derecha.
 
 			const controlEl = this.contentEl.createEl("div", {
 				cls: "from-template-control-row",
@@ -418,10 +394,9 @@ export class FT_TemplateInputModal extends Modal {
 			const element = this.createInputControl(
 				controlWrapper,
 				field,
-				// data, //! Use field.
 				updateFieldValue,
 				focusNextField,
-				index //! Should use field.id instead xd.
+				order
 			)
 
 			this._fields.set(field.id, field);
@@ -430,16 +405,18 @@ export class FT_TemplateInputModal extends Modal {
 			const keyEl = controlEl.createEl("div", {
 				cls: "from-template-key-column",
 			});	
+
+			if(order > 7) return; //We only count the first 8 valid Elements.
 			if (element) {
-				if (index === 0) element.focus();
+				if (order === 0) element.focus();
 				element.addClass("from-template-control");
-				if (index <= 8) {
-					// this.scope.register(["Mod"], `${index + 1}`, () => this.selectField(index));
+				if (order <= 8) {
 					keyEl.createEl("div", {
-						text: `${index + 1}`,
+						text: `${order + 1}`,
 						cls: "from-template-shortkey",
 					});
 				}
+				order++;
 			}
 		});
 
@@ -658,7 +635,7 @@ export class FT_TemplateInputModal extends Modal {
 				this._plugin.eventBus.dispatchEvent(
 					new ExecuteTemplateEvent({
 						templateId: finalSettings.templateMetadata.id,
-						finalSettings: finalSettings,
+						finalSettings,
 						inputData: { ...finalSettings.textReplacement_data },
 					}),
 				);

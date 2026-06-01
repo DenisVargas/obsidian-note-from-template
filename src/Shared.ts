@@ -138,6 +138,7 @@ export type TemplateField = {
 	//?: This does not generate an inputfield, but is listed on source text Replacement.
 	replaceOnly?: boolean;
 }
+//Used by noteToTemplateData to extract front-matter & body.
 export type TemplateRawData = {
 	frontmatter: Record<string, any>;
 	settings: Record<string, any>;
@@ -212,6 +213,8 @@ export interface iFT_PluginSettings {
 	selectionReplacementTemplates: string;
 	/**
 	 * Comma-separated list of field ids used to map user/editor input into template data.
+	 * This value comes from plugin-level settings (global defaults) and may later
+	 * be extended/overridden by template-local `template-input` metadata.
 	 * Example: "title,body,tags".
 	 */
 	rawInputFieldList: string;
@@ -231,26 +234,30 @@ export interface iFT_PluginSettings {
 	pluginConfigRaw: string;
 }
 
+export interface iFT_PreExecutionSettings extends iFT_PluginSettings {
+	fields: Map<string,TemplateField>;
+}
+
 /*
  * All of the information required to fill out a template with data.
- * Extends iFT_TemplateExecutionSettings so that the effective action settings (merged from global
+ * Extends iFT_PreExecutionSettings so that the effective action settings (merged from global
  * defaults and per-template overrides) travel with the template at execution time.
  */
-export interface iFT_ExecutionSettings extends iFT_PluginSettings {
+export interface iFT_ExecutionSettings extends iFT_PreExecutionSettings {
 	
 	//! Template specific. Replaced by [TemplateRawData]
 	/** Identifies the template (id, name, vault path) — used to register/invoke the command. */
 	templateMetadata: TemplateMetadata; //TODO: esto esta suplido tengo entendido.
-	/** Raw markdown body of the template file (everything after the frontmatter). */
-	templateFileContent: string; // Duplicate of TemplateRawData.body
+	/** 
+	 * @deprecated use {@link TemplateRawData.body}
+	 * Raw markdown body of the template file (everything after the frontmatter).
+	 */
+	templateFileContent: string;
 	/** 
 	 * @deprecated use {@link TemplateRawData.frontmatter}
-	 * Parsed YAML frontmatter of the template file as a key-value map. 
+	 * Parsed YAML frontmatter of the template file as a key-value map.
 	 */
 	templateProperties: Record<string, unknown>;
-	
-	/** Ordered list of fields declared in the template, used to build the input UI. */
-	fields: Map<string,TemplateField>;
 
 	/** Handlebars template string for replacing the active editor selection on submit. */
 	// textReplacement_Pattern: string;
@@ -365,7 +372,7 @@ export class ExtendedSettings implements iFT_ExecutionSettings {
 	/* ----------------------- end of Deprecation section ----------------------- */
 
 
-	constructor(globalSettings: iFT_PluginSettings, editorReference: Editor) {
+	constructor(globalSettings: iFT_PreExecutionSettings, editorReference: Editor) {
 		/* ----------------------------- Global Settings ---------------------------- */
 		this.templateDirectoryPath = globalSettings.templateDirectoryPath;
 		this.selectionReplacementPolicy = globalSettings.selectionReplacementPolicy;
@@ -415,15 +422,30 @@ export class ExtendedSettings implements iFT_ExecutionSettings {
 				break;
 		}
 
+		// Clone per invocation to avoid sharing mutable field objects across command executions/modal sessions.
+		this.fields = this.deepCopyFieldMap(globalSettings.fields);
 		this.templateFileContent = ""; //TODO: Cual es su default? Proximo a deprecar
 		this.templateProperties = {}; //TODO: Cual es su default? Proximo a deprecar
-		this.fields = new Map();
 		this.textReplacement_Pattern = ""; //TODO: deprecar: use [selectionReplacementTemplates[0]]
 		this.textReplacement_data = {}; //TODO: deprecar:
 
 		this.willReplaceSelection = false;
 		this.shouldCreateOpen = "create";
 		this.shouldReplaceSelection = "never";
+	}
+
+	private deepCopyFieldMap(fieldMap: Map<string,TemplateField>): Map<string,TemplateField> {
+		const copy = new Map(
+			Array.from(fieldMap.entries(), ([id, field]) => [
+				id,
+				{
+					...field,
+					args: field.args ? [...field.args] : [],
+					alternatives: field.alternatives ? [...field.alternatives] : [],
+				},
+			] as [string, TemplateField]),
+		);
+		return copy;
 	}
 }
 

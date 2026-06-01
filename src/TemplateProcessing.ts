@@ -12,6 +12,8 @@ import {
     TemplateCacheEntry,
     TemplateRawData,
     HandlebarsCompiledTemplate,
+	TemplateField,
+	iFT_PreExecutionSettings,
 	
 } from "./Shared.js";
 import {
@@ -23,6 +25,7 @@ import { compile, parse, template } from "handlebars";
 import FT_Plugin from "./main.js";
 import { FT_TemplateInputModal } from "./UI/TemplateInputModal.js";
 import { parseCsvStringList } from "./utils.js";
+import { FT_BuildInFields } from "./BuildIn.js";
 
 type TemplateCacheMap = Record<string, TemplateCacheEntry>;
 export type PreparedTemplate = {
@@ -45,7 +48,7 @@ export class FT_TemplateProcessor {
 		this._plugin.eventBus.addEventListener(
 			FT_DomEventId.ExecuteTemplate,
 			(event: Event) => {
-				console.log("Execute Template has ben called!");
+				console.debug("Execute Template has ben called!");
 				const executeEvent = event as ExecuteTemplateEvent;
 				const { templateId, inputData, finalSettings } = executeEvent.detail;
 
@@ -92,10 +95,12 @@ export class FT_TemplateProcessor {
 	private resolveTemplateSettings(
 		rawSettings: Record<string, any>,
 		globalSettings: iFT_PluginSettings,
-	): iFT_PluginSettings {
-		const resolved: iFT_PluginSettings = {
+	): iFT_PreExecutionSettings {
+		const resolved: iFT_PreExecutionSettings = {
 			...globalSettings,
+			fields: new Map<string, TemplateField>(),
 		};
+		console.debug(`Global settings Input Field List ${resolved.rawInputFieldList}`); //* OK
 
 		//We should be able to override global settings in a Template per Template basis.
 
@@ -103,16 +108,17 @@ export class FT_TemplateProcessor {
 			resolved.temptativeOutputFolder = rawSettings["template-output"];
 
 		if (typeof rawSettings["template-input"] === "string"){
-			const finalInputFieldList = Array.from(
-				new Set([
-					...parseCsvStringList(resolved.rawInputFieldList), // defaults
-					...parseCsvStringList(rawSettings["template-input"]), // template-input
-					// "templateResult", //! special Elements should be manually added to final Fields!
+
+			const finalInputFieldList = [
+				...new Set([
+					...parseCsvStringList(resolved.rawInputFieldList),
+					...parseCsvStringList(rawSettings["template-input"]),
 				]),
-			);
+			];
 			resolved.rawInputFieldList = finalInputFieldList.join(",");
-			// console.debug("Resolved Input Field List");
-			// console.debug(resolved.rawInputFieldList); //* OK
+			resolved.fields = this.parseTemplateInputFields(finalInputFieldList);
+		} else {
+			resolved.fields = this.parseTemplateInputFields(parseCsvStringList(resolved.rawInputFieldList));
 		}
 
 		if (typeof rawSettings["template-filename"] === "string")
@@ -176,8 +182,7 @@ export class FT_TemplateProcessor {
 			}
 			const rawData = templateData.value;
 			const { frontmatter: rawFrontmatter, settings: rawSettings, body: rawbody } = rawData;
-			// console.log("Meta data loaded")
-			// console.log(meta) // * OK
+			// console.log("Meta data loaded" + meta) // * OK
 
 			/* ---------------------------- Compile Template ---------------------------- */
 
@@ -199,9 +204,9 @@ export class FT_TemplateProcessor {
 			}
 
 			/* ---------------------------- Resolved Settings --------------------------- */
-
+			
 			/** Contains global settings + template defined overrides */
-			const resolvedTemplateSettings = this.resolveTemplateSettings(
+			const resolvedSettings = this.resolveTemplateSettings(
 				rawSettings,
 				settings,
 			)
@@ -209,23 +214,22 @@ export class FT_TemplateProcessor {
 
 			/* ----------------------------- Command Naming ----------------------------- */
 			
-			let name = vaultFile.basename; //By Default we use the same name as the file.
+			let vaultFileName = vaultFile.basename; //By Default we use the same name as the file.
 			if(rawSettings["template-command-name"]){
-				console.log("THIS SHOULD BE SETTED")
-				name = rawSettings["template-command-name"];
-				console.log(rawSettings["template-command-name"]);
+				vaultFileName = rawSettings["template-command-name"];
+				console.log("Command Registered as:"+ rawSettings["template-command-name"]);
 			}
 
 			/* -------------------------- Template Cache Entry -------------------------- */
 			const meta: TemplateMetadata = {
-				id: name,
-				name: name,
+				id: vaultFileName,
+				name: vaultFileName,
 				path: vaultFile.path
 			}
 			const cacheEntry: TemplateCacheEntry = {
 				meta,
+				rawData,
 				compiledTemplate,
-				rawData
 			};
 			if (nextCache[meta.id]) {
 				console.warn(
@@ -248,7 +252,8 @@ export class FT_TemplateProcessor {
 					const view = this._plugin.app.workspace.getActiveViewOfType(MarkdownView);
 					if (view && this && this._plugin.settings) {
 						const editor: Editor = view.editor;
-						const preExecutionSettings = new ExtendedSettings(resolvedTemplateSettings, editor)
+
+						const preExecutionSettings = new ExtendedSettings(resolvedSettings, editor);
 
 						preExecutionSettings.templateMetadata = meta;
 
@@ -517,7 +522,7 @@ export class FT_TemplateProcessor {
 		//TODO: Investigar Puede ser que matches solo de 1 si el frontmatter no esta precente?
 
 		const templateConfigs: Record<string, any> = {};
-		const fileProps: Record<string, any> = {};
+		const frontmatter: Record<string, any> = {};
 
 		try {
 			/** Full template-file front-matter */ 
@@ -526,21 +531,16 @@ export class FT_TemplateProcessor {
 				//Filter template configs from content
 				if (TEMPLATE_FIELDS.contains(key)) {
 					templateConfigs[key] = fullFrontMatter[key];
-					console.log("TEMPLATE CONFIG:\n", key, "\n", templateConfigs[key]);
+					console.debug("TEMPLATE CONFIG:\n", key, "\n", templateConfigs[key]);
 				}
-				else fileProps[key] = fullFrontMatter[key];
+				else frontmatter[key] = fullFrontMatter[key];
 			}
-
-			// console.debug("Parsed FrontMatter");
-			// console.debug(fullFrontMatter);
-			console.debug("FileProperties");
-			console.debug(fileProps);
-			console.debug("Template Configs");
-			console.debug(templateConfigs)
+			console.debug("Template Configs\n", templateConfigs);
+			console.debug("Template FrontMatter:\n", frontmatter);
 
 			return Ok({
 				body,
-				frontmatter: fileProps,
+				frontmatter,
 				settings: templateConfigs,
 			});
 		} catch (error) {
@@ -588,6 +588,42 @@ export class FT_TemplateProcessor {
 		const r: Record<string, string> = {};
 		zip(fields, input_parts).forEach((f) => (r[f[0]] = f[1]));
 		return r;
+	}
+
+	private parseTemplateInputFields(templateInputList: string[]): Map<string, TemplateField> {
+		return templateInputList.reduce<Map<string, TemplateField>>((acc, declaredField) => {
+			//BuildIn contains default values for fields, renderable fields like ("title" & "body")
+			// must be present in settings to be listed. Otherwise they are ignored.
+			const builtIn = FT_BuildInFields.get(declaredField);
+	
+			if (builtIn) {
+				// Defensive copy
+				acc.set(declaredField, {
+					...builtIn,
+					id: declaredField,
+					args: builtIn.args ? [...builtIn.args] : [],
+					alternatives: builtIn.alternatives ? [...builtIn.alternatives] : [],
+				});
+				return acc;
+			}
+
+			//Special cases: templateResult, date&time, date
+			//They are filled with default values, but final values
+			// are resolved at execution stage.
+	
+			// Campo no built-in: default básico
+			acc.set(declaredField, {
+				id: declaredField,
+				value: "",
+				inputType: "text",
+				description: "",
+				args: [],
+				alternatives: [],
+				replaceOnly: false,
+			});
+	
+			return acc;
+		}, new Map<string, TemplateField>());
 	}
 
 	/**
