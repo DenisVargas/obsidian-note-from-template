@@ -112,18 +112,29 @@ export class FT_TemplateProcessor {
 		if (typeof rawSettings["template-output"] === "string")
 			resolved.temptativeOutputFolder = rawSettings["template-output"];
 
-		if (typeof rawSettings["template-input"] === "string"){
+		const rawTemplateInput = rawSettings["template-input"];
+		const templateInputFields =
+			typeof rawTemplateInput === "string"
+				? parseCsvStringList(rawTemplateInput)
+				: Array.isArray(rawTemplateInput)
+					? rawTemplateInput
+						.map((value) => String(value).trim())
+						.filter(Boolean)
+					: [];
 
+		if (templateInputFields.length > 0) {
 			const finalInputFieldList = [
 				...new Set([
 					...parseCsvStringList(resolved.rawInputFieldList),
-					...parseCsvStringList(rawSettings["template-input"]),
+					...templateInputFields,
 				]),
 			];
 			resolved.rawInputFieldList = finalInputFieldList.join(",");
 			resolved.fields = this.parseTemplateInputFields(finalInputFieldList);
 		} else {
-			resolved.fields = this.parseTemplateInputFields(parseCsvStringList(resolved.rawInputFieldList));
+			resolved.fields = this.parseTemplateInputFields(
+				parseCsvStringList(resolved.rawInputFieldList),
+			);
 		}
 
 		if (typeof rawSettings["template-filename"] === "string")
