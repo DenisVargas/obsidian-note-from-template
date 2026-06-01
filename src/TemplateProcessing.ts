@@ -243,6 +243,8 @@ export class FT_TemplateProcessor {
 				rawSettings,
 				settings,
 			)
+			const hasTemplateOutputNoteHandlingOverride =
+				typeof rawSettings["template-should-create"] === "string";
 			// This is base Settings, complete the extended version bellow.
 
 			/* ----------------------------- Command Naming ----------------------------- */
@@ -287,6 +289,9 @@ export class FT_TemplateProcessor {
 						const editor: Editor = view.editor;
 
 						const preExecutionSettings = new ExtendedSettings(resolvedSettings, editor);
+						if (!hasTemplateOutputNoteHandlingOverride) {
+							preExecutionSettings.outputNoteHandling = this._plugin.settings.outputNoteHandling;
+						}
 
 						preExecutionSettings.templateMetadata = meta;
 
