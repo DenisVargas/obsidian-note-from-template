@@ -1,4 +1,5 @@
 import { Editor, MarkdownView, TFile, TFolder, Vault, parseYaml, stringifyYaml } from "obsidian";
+import { DateTime } from "luxon";
 import {
 	TemplateMetadata,
 	TEMPLATE_FIELDS,
@@ -28,6 +29,8 @@ import {
 	buildVaultFilePath,
 	containsFilenameToken,
 	isUnsafeVaultFolderPath,
+	normalizeHandlebarsBuiltInTokens,
+	normalizeObsidianDateFormat,
 	normalizeVaultFolderPath,
 	parseCsvStringList,
 } from "./utils.js";
@@ -228,7 +231,7 @@ export class FT_TemplateProcessor {
 				templateSource = rawbody;
 
 			try {
-				compiledTemplate = compile(templateSource);
+				compiledTemplate = compile(normalizeHandlebarsBuiltInTokens(templateSource));
 			} catch (error) {
 				console.warn(
 					`Couldn't compile template '${vaultFile.path}': ${error instanceof Error ? error.message : String(error)}`,
@@ -292,6 +295,15 @@ export class FT_TemplateProcessor {
 						if (!hasTemplateOutputNoteHandlingOverride) {
 							preExecutionSettings.outputNoteHandling = this._plugin.settings.outputNoteHandling;
 						}
+						const vaultConfig = this._plugin.app.vault as Vault & {
+							getConfig?: (key: string) => string | undefined;
+						};
+						preExecutionSettings.obsidianDateFormat = normalizeObsidianDateFormat(
+							vaultConfig.getConfig?.("dateFormat"),
+						);
+						preExecutionSettings.obsidianTimeFormat = normalizeObsidianDateFormat(
+							vaultConfig.getConfig?.("timeFormat"),
+						);
 
 						preExecutionSettings.templateMetadata = meta;
 
@@ -346,6 +358,16 @@ export class FT_TemplateProcessor {
 		inputData.filename = runtimeFilename;
 		finalSettings.textReplacement_data.filename = runtimeFilename;
 
+		const now = DateTime.local();
+		const runtimeDate = now.toISODate() ?? now.toFormat("yyyy-MM-dd");
+		const runtimeDateTime = now.toFormat("yyyy-MM-dd'T'HH:mm:ss");
+		inputData["date"] = runtimeDate;
+		inputData["date&time"] = runtimeDateTime;
+		inputData.dateAndTime = runtimeDateTime;
+		finalSettings.textReplacement_data["date"] = runtimeDate;
+		finalSettings.textReplacement_data["date&time"] = runtimeDateTime;
+		finalSettings.textReplacement_data.dateAndTime = runtimeDateTime;
+
 		//* AVIABLE
 		// const { id, name: name, path } = cached.meta;
 		// const { frontmatter, template_settings, body } = cached.rawData;
@@ -359,7 +381,9 @@ export class FT_TemplateProcessor {
 			console.log(`Current SElection is ${selection}\nPolicy set as ${policy}`);
 			if(policy === "always" || policy === "selected-only"){
 				console.debug("Should replace selection");
-				const replaceMentTemplate = compile(selection);
+				const replaceMentTemplate = compile(
+					normalizeHandlebarsBuiltInTokens(selection),
+				);
 				const replaced = replaceMentTemplate(finalSettings.textReplacement_data);
 				editor.replaceSelection(replaced);
 			}
@@ -743,8 +767,9 @@ export class FT_TemplateProcessor {
 		}
 
 		try {
-		  const compiled = compile(templateSource);
-		  const ast = parse(templateSource);
+		  const normalizedTemplateSource = normalizeHandlebarsBuiltInTokens(templateSource);
+		  const compiled = compile(normalizedTemplateSource);
+		  const ast = parse(normalizedTemplateSource);
 		
 		  const fieldNames = this.collectFieldNamesFromAst(ast);
 		

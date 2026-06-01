@@ -244,6 +244,10 @@ export interface iFT_PreExecutionSettings extends iFT_PluginSettings {
  * defaults and per-template overrides) travel with the template at execution time.
  */
 export interface iFT_ExecutionSettings extends iFT_PreExecutionSettings {
+	/** Current Obsidian-configured date format, normalized for runtime rendering. */
+	obsidianDateFormat: string;
+	/** Current Obsidian-configured time format, normalized for runtime rendering. */
+	obsidianTimeFormat: string;
 	
 	//! Template specific. Replaced by [TemplateRawData]
 	/** Identifies the template (id, name, vault path) — used to register/invoke the command. */
@@ -331,6 +335,10 @@ export class ExtendedSettings implements iFT_ExecutionSettings {
 	/** @inheritDoc */
 	editorSelection: string;
 	/** @inheritdoc */
+	obsidianDateFormat: string;
+	/** @inheritdoc */
+	obsidianTimeFormat: string;
+	/** @inheritdoc */
 	templateMetadata: TemplateMetadata;
 	/** @inheritdoc */
 	templateFileContent: string;
@@ -387,6 +395,8 @@ export class ExtendedSettings implements iFT_ExecutionSettings {
 
 		this.outputDirectory = "";
 		this.outputFileName = "";
+		this.obsidianDateFormat = "yyyy-MM-dd";
+		this.obsidianTimeFormat = "HH:mm";
 
 		/* ---------------------------- Extended Settings --------------------------- */
 		// This settings section are used for execution only.

@@ -214,7 +214,7 @@ export class FT_SettingTab extends PluginSettingTab {
 					toggle
 						.addOption("none", "Don't create note")
 						.addOption("create", "Create but don't open")
-						.addOption("open", "Create and open in this pane")
+						.addOption("open", "Create and Open")
 						.addOption("open-pane", "Create and open in new pane")
 						.addOption("open-tab", "Create and open in new tab")
 						.setValue(pluginSettings.outputNoteHandling)
