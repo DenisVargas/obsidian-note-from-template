@@ -8,6 +8,7 @@ import type {
 import FT_Plugin from "../main.js";
 import { FT_TemplateProcessor } from "../TemplateProcessing.js";
 import {
+	containsFilenameToken,
 	isUnsafeVaultFolderPath,
 	normalizeSettingsOutputFolder,
 } from "../utils.js";
@@ -234,15 +235,65 @@ export class FT_SettingTab extends PluginSettingTab {
 					"What to call notes if they have not specified {{template-filename}}.",
 				)
 				.addText((text) => {
+					let isSyncing = false;
+					let pendingValue = pluginSettings.temptativeFileName;
+
+					const commitValue = async () => {
+						if (isSyncing) return;
+						const previous = pluginSettings.temptativeFileName;
+
+						if (containsFilenameToken(pendingValue)) {
+							new Notice(
+								"Default Output Filename cannot contain {{filename}}. It was reset to {{title}}.",
+							);
+							const resetValue = "{{title}}";
+
+							isSyncing = true;
+							text.setValue(resetValue);
+							pendingValue = resetValue;
+							isSyncing = false;
+
+							await saveIfChanged(
+								previous,
+								resetValue,
+								() => {
+									pluginSettings.temptativeFileName = resetValue;
+								},
+								{ triggerReload: true },
+							);
+							return;
+						}
+
+						isSyncing = true;
+						text.setValue(pendingValue);
+						isSyncing = false;
+
+						await saveIfChanged(
+							previous,
+							pendingValue,
+							() => {
+								pluginSettings.temptativeFileName = pendingValue;
+							},
+							{ triggerReload: true },
+						);
+					};
+
 					text.setPlaceholder("{{title}}");
-					bindCommittedTextSetting(
-						text,
-						() => pluginSettings.temptativeFileName,
-						(value) => {
-							pluginSettings.temptativeFileName = value;
-						},
-						{ triggerReload: true },
-					);
+					text.setValue(pluginSettings.temptativeFileName);
+					text.onChange((value: string) => {
+						if (isSyncing) return;
+						pendingValue = value;
+					});
+
+					text.inputEl.addEventListener("blur", () => {
+						void commitValue();
+					});
+					text.inputEl.addEventListener("keydown", (ev: KeyboardEvent) => {
+						if (ev.key !== "Enter") return;
+						ev.preventDefault();
+						void commitValue();
+						text.inputEl.blur();
+					});
 				});
 			new Setting(containerEl)
 				.setName("Default Output Directory")
@@ -256,6 +307,28 @@ export class FT_SettingTab extends PluginSettingTab {
 					const commitValue = async () => {
 						if (isSyncing) return;
 						const previous = pluginSettings.temptativeOutputFolder;
+
+						if (containsFilenameToken(pendingValue)) {
+							new Notice(
+								"Default Output Directory cannot contain {{filename}}. It was reset to vault root.",
+							);
+							const resetValue = "";
+
+							isSyncing = true;
+							text.setValue(resetValue);
+							pendingValue = resetValue;
+							isSyncing = false;
+
+							await saveIfChanged(
+								previous,
+								resetValue,
+								() => {
+									pluginSettings.temptativeOutputFolder = resetValue;
+								},
+								{ triggerReload: true },
+							);
+							return;
+						}
 
 						if (isUnsafeVaultFolderPath(pendingValue)) {
 							new Notice(

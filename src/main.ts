@@ -23,6 +23,7 @@ import {
 } from "./UI/index.js";
 import { FT_TemplateProcessor } from "./TemplateProcessing.js";
 import {
+	containsFilenameToken,
 	isUnsafeVaultFolderPath,
 	normalizeVaultFolderPath,
 	printObjectProperties,
@@ -388,7 +389,7 @@ export default class FT_Plugin extends Plugin {
 			temptativeFileName: "{{title}}", //Default Template Name
 			outputDirectory: "", //Efective Directory - if temptativeOutputFolder is a template, this is the final"resolved" value.
 			outputFileName: "", //Efective Filename - if temptativeFileName is a template, this is the final "resolved" value.
-			selectionReplacementTemplates: "{{title}}", //Default Replacement String
+			selectionReplacementTemplates: "{{filename}}", //Default Replacement String
 			rawInputFieldList: "title,body", // Default Field List
 			inputSplitPattern: "\\s+-\\s+", // Selection Split
 			enableInputSuggestions: true, //Input Suggestions
@@ -406,6 +407,21 @@ export default class FT_Plugin extends Plugin {
 			DEFAULT_SETTINGS,
 			fromDisk,
 		);
+
+		if (containsFilenameToken(combinedDefaultSettings.temptativeFileName)) {
+			console.warn(
+				"Default Output Filename cannot contain {{filename}}. Falling back to '{{title}}'.",
+			);
+			combinedDefaultSettings.temptativeFileName = "{{title}}";
+		}
+
+		if (containsFilenameToken(combinedDefaultSettings.temptativeOutputFolder)) {
+			console.warn(
+				"Default Output Directory cannot contain {{filename}}. Falling back to vault root.",
+			);
+			combinedDefaultSettings.temptativeOutputFolder = "";
+		}
+
 		console.debug(
 			`Default config is loaded:\n\n${printObjectProperties(combinedDefaultSettings)}\n`,
 		);

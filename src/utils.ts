@@ -58,6 +58,15 @@ export function parseCsvStringList(value: string): string[] {
 }
 
 /**
+ * Returns true if a template string references the built-in {{filename}} token.
+ * Accepts both double and triple brace forms.
+ */
+export function containsFilenameToken(value: string | undefined): boolean {
+	if (!value) return false;
+	return /{{{?\s*filename\s*}?}}/i.test(value);
+}
+
+/**
  * Normalizes a vault-relative folder path.
  *
  * Root aliases "", "/" and "./" are normalized to "".

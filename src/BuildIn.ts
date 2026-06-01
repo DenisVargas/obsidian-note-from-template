@@ -33,6 +33,10 @@ export const FT_BuildInFields = new Map<string, TemplateField>([
         { id: "templateResult", value:"", inputType: "no-render", args: [""], description: "The Note's final content, includes all fields replaced", replaceOnly:true },
     ],
     [
+        "filename",
+        { id: "filename", value:"", inputType: "no-render", args: [""], description: "The final output filename without extension or path", replaceOnly:true },
+    ],
+    [
         "date&time",
         { id: "date&time", value:"", inputType: "no-render", args: [""], description: "The Note's final content, includes all fields replaced", replaceOnly:true },
     ],

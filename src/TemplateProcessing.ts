@@ -26,6 +26,7 @@ import FT_Plugin from "./main.js";
 import { FT_TemplateInputModal } from "./UI/TemplateInputModal.js";
 import {
 	buildVaultFilePath,
+	containsFilenameToken,
 	isUnsafeVaultFolderPath,
 	normalizeVaultFolderPath,
 	parseCsvStringList,
@@ -109,8 +110,16 @@ export class FT_TemplateProcessor {
 
 		//We should be able to override global settings in a Template per Template basis.
 
-		if (typeof rawSettings["template-output"] === "string")
-			resolved.temptativeOutputFolder = rawSettings["template-output"];
+		if (typeof rawSettings["template-output"] === "string") {
+			if (containsFilenameToken(rawSettings["template-output"])) {
+				console.warn(
+					"template-output cannot contain {{filename}}. Falling back to vault root.",
+				);
+				resolved.temptativeOutputFolder = "";
+			} else {
+				resolved.temptativeOutputFolder = rawSettings["template-output"];
+			}
+		}
 
 		const rawTemplateInput = rawSettings["template-input"];
 		const templateInputFields =
@@ -137,9 +146,17 @@ export class FT_TemplateProcessor {
 			);
 		}
 
-		if (typeof rawSettings["template-filename"] === "string")
-			//This have to be resolved during execution phase.
-			resolved.temptativeFileName = rawSettings["template-filename"];
+		if (typeof rawSettings["template-filename"] === "string") {
+			if (containsFilenameToken(rawSettings["template-filename"])) {
+				console.warn(
+					"template-filename cannot contain {{filename}}. Falling back to '{{title}}'.",
+				);
+				resolved.temptativeFileName = "{{title}}";
+			} else {
+				//This have to be resolved during execution phase.
+				resolved.temptativeFileName = rawSettings["template-filename"];
+			}
+		}
 
 		if (typeof rawSettings["template-should-replace"] === "string"){
 			resolved.selectionReplacementPolicy = rawSettings["template-should-replace"] as iFT_PluginSettings["selectionReplacementPolicy"];
@@ -317,6 +334,12 @@ export class FT_TemplateProcessor {
 		}
 
 		const render = cached.compiledTemplate;
+
+		const outputNameRaw = String(finalSettings.outputFileName ?? "").trim();
+		const outputNameNoPath = outputNameRaw.split("/").pop() ?? outputNameRaw;
+		const runtimeFilename = outputNameNoPath.replace(/\.md$/i, "");
+		inputData.filename = runtimeFilename;
+		finalSettings.textReplacement_data.filename = runtimeFilename;
 
 		//* AVIABLE
 		// const { id, name: name, path } = cached.meta;

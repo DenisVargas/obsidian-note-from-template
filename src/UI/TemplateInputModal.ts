@@ -485,6 +485,7 @@ export class FT_TemplateInputModal extends Modal {
 			
 		const fieldNames: string[] = parseCsvStringList(options.rawInputFieldList);
 		fieldNames.push("templateResult");
+		if (!fieldNames.includes("filename")) fieldNames.push("filename");
 
 		const availableFieldsRow = this.contentEl.createDiv({
 			cls: ["from-template-control-row"]
