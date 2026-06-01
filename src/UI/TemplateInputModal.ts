@@ -310,7 +310,7 @@ export class FT_TemplateInputModal extends Modal {
 			/* -------------------------------------------------------------------------- */
 			
 			// Dinamic Resolution of Output File Name.
-			//!Warning: This might require multiple fields, if tempalte has more than just {{title}} or similar.
+			//!Warning: This might require multiple fields, if template has more than just {{title}} or similar.
 			if(this._mustResolveName && this._destinationInfoNameFields && this._nameTemplate && this._destinationInfo_RenderName){
 				
 				/** If current field is part of _destinationInfoNameFields */
@@ -339,15 +339,16 @@ export class FT_TemplateInputModal extends Modal {
 			}
 
 			//Resolve path
-			if( this._mustResolvePath && this._pathTemplate){
-				let path = this._pathTemplate;
-				if(this._destinationInfoRenderPath){
-					path = this._destinationInfoRenderPath({[id]:newValue});
+			if( this._mustResolvePath && this._pathTemplate && this._destinationInfoPathFields && this._destinationInfoRenderPath){
+				const isPartOfPath = this._destinationInfoPathFields[id] !== undefined;
+				if(isPartOfPath){
+					this._destinationInfoPathFields[id] = newValue;
+					const path = this._destinationInfoRenderPath(this._destinationInfoPathFields);
 					console.log(`Resolved path is: ${path}`);
 					this._pathIsResolved = true;
+					this._settings.outputDirectory = path;
+					this._pathRef.value = path;
 				}
-				this._settings.outputDirectory = path;
-				this._pathRef.value = path;
 			}
 		};
 		const focusNextField = (index:number) =>{
