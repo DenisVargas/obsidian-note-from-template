@@ -24,7 +24,12 @@ import {
 import { compile, parse, template } from "handlebars";
 import FT_Plugin from "./main.js";
 import { FT_TemplateInputModal } from "./UI/TemplateInputModal.js";
-import { parseCsvStringList } from "./utils.js";
+import {
+	buildVaultFilePath,
+	isUnsafeVaultFolderPath,
+	normalizeVaultFolderPath,
+	parseCsvStringList,
+} from "./utils.js";
 import { FT_BuildInFields } from "./BuildIn.js";
 
 type TemplateCacheMap = Record<string, TemplateCacheEntry>;
@@ -325,7 +330,17 @@ export class FT_TemplateProcessor {
 
 		/* ------------------------ File Creation and Opening ----------------------- */
 		try {
-			const targetPath = finalSettings.outputDirectory;
+			const targetPathRaw = finalSettings.outputDirectory;
+			const targetPath = isUnsafeVaultFolderPath(targetPathRaw)
+				? ""
+				: normalizeVaultFolderPath(targetPathRaw);
+			if (targetPath === "" && targetPathRaw.trim() !== "" && isUnsafeVaultFolderPath(targetPathRaw)) {
+				console.warn(
+					`Unsafe output path '${targetPathRaw}' detected during execution. Falling back to vault root.`,
+				);
+			}
+			finalSettings.outputDirectory = targetPath;
+
 			const targetFileName = finalSettings.outputFileName;
 			const OutputFileContent: string = render(inputData); //* OK
 
@@ -561,10 +576,19 @@ export class FT_TemplateProcessor {
 	 * @returns The created vault file descriptor.
 	 */
 	async newVaultFile(content: string, outputPath: string, fileName: string): Promise<TFile>{
-		const filePath = `${outputPath}/${fileName}.md`;
+		const safeOutputPath = isUnsafeVaultFolderPath(outputPath)
+			? ""
+			: normalizeVaultFolderPath(outputPath);
+		if (safeOutputPath === "" && outputPath.trim() !== "" && isUnsafeVaultFolderPath(outputPath)) {
+			console.warn(
+				`Unsafe output path '${outputPath}' detected before file creation. Falling back to vault root.`,
+			);
+		}
+
+		const filePath = buildVaultFilePath(safeOutputPath, fileName);
 		console.log("Target Path")
 		console.log(filePath);
-		await this._plugin.createFolderIfNeeded(outputPath);
+		await this._plugin.createFolderIfNeeded(safeOutputPath);
 		const newFile = await this._vault.create(filePath, content);
 		return newFile;
 	}

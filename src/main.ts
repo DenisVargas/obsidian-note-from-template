@@ -22,7 +22,11 @@ import {
 	FT_TemplateInputModal,
 } from "./UI/index.js";
 import { FT_TemplateProcessor } from "./TemplateProcessing.js";
-import { printObjectProperties } from "./utils.js";
+import {
+	isUnsafeVaultFolderPath,
+	normalizeVaultFolderPath,
+	printObjectProperties,
+} from "./utils.js";
 
 export default class FT_Plugin extends Plugin {
 	/**
@@ -307,8 +311,18 @@ export default class FT_Plugin extends Plugin {
 	}
 
 	async createFolderIfNeeded(folder: string) {
-		if (!this.checkIfFolderExists(folder)){
-			await this.folderCreateModal.createDirectory(folder)
+		const normalizedFolder = normalizeVaultFolderPath(folder);
+		if (!normalizedFolder) return;
+
+		if (isUnsafeVaultFolderPath(folder)) {
+			console.warn(
+				`Unsafe folder path '${folder}' detected while creating destination folder. Falling back to vault root.`,
+			);
+			return;
+		}
+
+		if (!this.checkIfFolderExists(normalizedFolder)){
+			await this.folderCreateModal.createDirectory(normalizedFolder)
 			return;
 		}
 

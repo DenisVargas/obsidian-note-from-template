@@ -57,6 +57,67 @@ export function parseCsvStringList(value: string): string[] {
 		.filter(Boolean);
 }
 
+/**
+ * Normalizes a vault-relative folder path.
+ *
+ * Root aliases "", "/" and "./" are normalized to "".
+ */
+export function normalizeVaultFolderPath(input: string | undefined): string {
+	const raw = (input ?? "").trim().replace(/\\/g, "/");
+	if (raw === "" || raw === "/" || raw === "./") return "";
+
+	let normalized = raw;
+	while (normalized.startsWith("./")) {
+		normalized = normalized.slice(2);
+	}
+
+	normalized = normalized.replace(/\/{2,}/g, "/");
+	normalized = normalized.replace(/^\/+/, "");
+	normalized = normalized.replace(/\/+$/, "");
+
+	if (normalized === ".") return "";
+	return normalized;
+}
+
+/**
+ * Returns true when the provided folder path attempts to escape vault boundaries.
+ */
+export function isUnsafeVaultFolderPath(input: string | undefined): boolean {
+	const raw = (input ?? "").trim();
+	if (raw === "" || raw === "/" || raw === "./") return false;
+
+	if (/^[A-Za-z]:[\\/]/.test(raw)) return true;
+
+	const normalized = normalizeVaultFolderPath(raw);
+	if (normalized === "") return false;
+
+	const segments = normalized.split("/");
+	return segments.some((segment) => segment === "..");
+}
+
+/**
+ * Builds a final vault file path from folder + fileName.
+ */
+export function buildVaultFilePath(folder: string, fileName: string): string {
+	const normalizedFolder = normalizeVaultFolderPath(folder);
+	const normalizedFileName = fileName.trim();
+
+	if (!normalizedFolder) return `${normalizedFileName}.md`;
+	return `${normalizedFolder}/${normalizedFileName}.md`;
+}
+
+/**
+ * Normalizes a settings path value to a canonical folder representation.
+ *
+ * - Root aliases ("", "/", "./") become "".
+ * - Non-root values always end with "/".
+ */
+export function normalizeSettingsOutputFolder(input: string | undefined): string {
+	const normalized = normalizeVaultFolderPath(input);
+	if (!normalized) return "";
+	return normalized.endsWith("/") ? normalized : `${normalized}/`;
+}
+
 //Utility for debugging
 export function printObjectProperties(obj: Record<string, unknown>): string {
 	//If it gets a null or undefined object should not throw error.

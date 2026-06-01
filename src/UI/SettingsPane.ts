@@ -1,4 +1,4 @@
-import { PluginSettingTab, Setting } from "obsidian";
+import { Notice, PluginSettingTab, Setting } from "obsidian";
 //Aviable: MarkdownView, Modal, normalizePath, Notice, Plugin, TextComponent, TFile, TFolder
 import type {
 	CreateType,
@@ -7,10 +7,15 @@ import type {
 } from "../Shared.js";
 import FT_Plugin from "../main.js";
 import { FT_TemplateProcessor } from "../TemplateProcessing.js";
+import {
+	isUnsafeVaultFolderPath,
+	normalizeSettingsOutputFolder,
+} from "../utils.js";
 
 export class FT_SettingTab extends PluginSettingTab {
 	plugin: FT_Plugin;
 	templateDirChanged: boolean = false;
+	templateReloadPending: boolean = false;
 
 	constructor(plugin: FT_Plugin) {
 		super(plugin.app, plugin);
@@ -19,6 +24,7 @@ export class FT_SettingTab extends PluginSettingTab {
 
 	resetTracking() {
 		this.templateDirChanged = false;
+		this.templateReloadPending = false;
 	}
 
 	getDirectoryText(folder: string): [string, string, string] {
@@ -40,11 +46,10 @@ export class FT_SettingTab extends PluginSettingTab {
 
 	hide(): void {
 		console.debug("Settings panel closed");
-		//Maybe it does have sense to re-index templates after edit-settings is done.
-		if (this.templateDirChanged) {
-			//We reload the templates directory.
-			console.log("Should Trigger Reload");
+		if (this.templateReloadPending && this.plugin.settings) {
+			void this.plugin.indexTemplates(this.plugin.settings);
 		}
+		this.resetTracking();
 	}
 
 	async display(): Promise<void> {
@@ -60,6 +65,67 @@ export class FT_SettingTab extends PluginSettingTab {
 
 		const syncCurrentSettings = () => {
 			this.plugin.settings = pluginSettings;
+		};
+
+		const saveIfChanged = async <T>(
+			current: T,
+			next: T,
+			apply: () => void,
+			options?: { triggerReload?: boolean },
+		): Promise<boolean> => {
+			if (current === next) return false;
+			apply();
+			if (options?.triggerReload) {
+				this.templateReloadPending = true;
+			}
+			syncCurrentSettings();
+			await this.plugin.saveSettings();
+			return true;
+		};
+
+		const bindCommittedTextSetting = (
+			text: { setValue: (value: string) => any; onChange: (cb: (value: string) => void) => any; inputEl: HTMLInputElement },
+			getCurrent: () => string,
+			applyNext: (value: string) => void,
+			options?: { triggerReload?: boolean },
+		) => {
+			let isSyncing = false;
+			let pendingValue = getCurrent();
+
+			const commitValue = async () => {
+				if (isSyncing) return;
+				const previous = getCurrent();
+				const next = pendingValue;
+
+				isSyncing = true;
+				text.setValue(next);
+				isSyncing = false;
+
+				await saveIfChanged(
+					previous,
+					next,
+					() => {
+						applyNext(next);
+					},
+					options,
+				);
+			};
+
+			text.setValue(pendingValue);
+			text.onChange((value: string) => {
+				if (isSyncing) return;
+				pendingValue = value;
+			});
+
+			text.inputEl.addEventListener("blur", () => {
+				void commitValue();
+			});
+			text.inputEl.addEventListener("keydown", (ev: KeyboardEvent) => {
+				if (ev.key !== "Enter") return;
+				ev.preventDefault();
+				void commitValue();
+				text.inputEl.blur();
+			});
 		};
 
 		//This is not saving
@@ -79,6 +145,10 @@ export class FT_SettingTab extends PluginSettingTab {
 		};
 
 		if (processor && this.plugin && pluginSettings) {
+			pluginSettings.temptativeOutputFolder = normalizeSettingsOutputFolder(
+				pluginSettings.temptativeOutputFolder,
+			);
+
 			const folders = processor.getTemplateFolders();
 
 			const opts: Record<string, string> = {};
@@ -96,15 +166,18 @@ export class FT_SettingTab extends PluginSettingTab {
 					.addOptions(opts)
 					.setValue(pluginSettings.templateDirectoryPath)
 					.onChange(async (value) => {
-						this.templateDirChanged =
-							pluginSettings.templateDirectoryPath !=
-							this.plugin.settings?.templateDirectoryPath;
-
-						pluginSettings.templateDirectoryPath = value;
+						const previous = pluginSettings.templateDirectoryPath;
+						this.templateDirChanged = previous !== value;
 						updateFolderDescription(value);
 
-						syncCurrentSettings();
-						await this.plugin.saveSettings();
+						await saveIfChanged(
+							previous,
+							value,
+							() => {
+								pluginSettings.templateDirectoryPath = value;
+							},
+							{ triggerReload: true },
+						);
 					}),
 			);
 
@@ -122,9 +195,14 @@ export class FT_SettingTab extends PluginSettingTab {
 						.addOption("never", "Never")
 						.setValue(pluginSettings.selectionReplacementPolicy)
 						.onChange(async (value) => {
-							pluginSettings.selectionReplacementPolicy =
-								value as ReplacementStrategy;
-							await this.plugin.saveSettings();
+							const next = value as ReplacementStrategy;
+							await saveIfChanged(
+								pluginSettings.selectionReplacementPolicy,
+								next,
+								() => {
+									pluginSettings.selectionReplacementPolicy = next;
+								},
+							);
 						}),
 				);
 
@@ -140,8 +218,14 @@ export class FT_SettingTab extends PluginSettingTab {
 						.addOption("open-tab", "Create and open in new tab")
 						.setValue(pluginSettings.outputNoteHandling)
 						.onChange(async (value) => {
-							pluginSettings.outputNoteHandling = value as CreateType;
-							await this.plugin.saveSettings();
+							const next = value as CreateType;
+							await saveIfChanged(
+								pluginSettings.outputNoteHandling,
+								next,
+								() => {
+									pluginSettings.outputNoteHandling = next;
+								},
+							);
 						}),
 				);
 			new Setting(containerEl)
@@ -149,68 +233,131 @@ export class FT_SettingTab extends PluginSettingTab {
 				.setDesc(
 					"What to call notes if they have not specified {{template-filename}}.",
 				)
-				.addText((text) =>
-					text
-						.setPlaceholder("{{title}}")
-						.setValue(pluginSettings.temptativeFileName)
-						.onChange(async (value) => {
+				.addText((text) => {
+					text.setPlaceholder("{{title}}");
+					bindCommittedTextSetting(
+						text,
+						() => pluginSettings.temptativeFileName,
+						(value) => {
 							pluginSettings.temptativeFileName = value;
-							await this.plugin.saveSettings();
-						}),
-				);
+						},
+						{ triggerReload: true },
+					);
+				});
 			new Setting(containerEl)
 				.setName("Default Output Directory")
 				.setDesc(
 					'Where to put notes if they have not specified with {{template-output}}, Default value is "" (Your Vault\'s root)',
 				)
-				.addText((text) =>
-					text
-						.setValue(pluginSettings.temptativeOutputFolder)
-						.onChange(async (value: string) => {
-							pluginSettings.temptativeOutputFolder = value;
-							await this.plugin.saveSettings();
-						}),
-				);
+				.addText((text) => {
+					let isSyncing = false;
+					let pendingValue = pluginSettings.temptativeOutputFolder;
+
+					const commitValue = async () => {
+						if (isSyncing) return;
+						const previous = pluginSettings.temptativeOutputFolder;
+
+						if (isUnsafeVaultFolderPath(pendingValue)) {
+							new Notice(
+								"Invalid output path detected. It was reset to vault root.",
+							);
+							const resetValue = "";
+
+							isSyncing = true;
+							text.setValue(resetValue);
+							pendingValue = resetValue;
+							isSyncing = false;
+
+							await saveIfChanged(
+								previous,
+								resetValue,
+								() => {
+									pluginSettings.temptativeOutputFolder = resetValue;
+								},
+								{ triggerReload: true },
+							);
+							return;
+						}
+
+						const normalized = normalizeSettingsOutputFolder(pendingValue);
+
+						isSyncing = true;
+						text.setValue(normalized);
+						pendingValue = normalized;
+						isSyncing = false;
+
+						await saveIfChanged(
+							previous,
+							normalized,
+							() => {
+								pluginSettings.temptativeOutputFolder = normalized;
+							},
+							{ triggerReload: true },
+						);
+					};
+
+					text.setValue(pluginSettings.temptativeOutputFolder);
+					text.onChange((value: string) => {
+						if (isSyncing) return;
+						pendingValue = value;
+					});
+
+					text.inputEl.addEventListener("blur", () => {
+						void commitValue();
+					});
+					text.inputEl.addEventListener("keydown", (ev: KeyboardEvent) => {
+						if (ev.key !== "Enter") return;
+						ev.preventDefault();
+						void commitValue();
+						text.inputEl.blur();
+					});
+				});
 			new Setting(containerEl)
 				.setName("Default replacement string")
 				.setDesc(
 					"What replacement string to use if the template has not specified using {{template-replacement}}",
 				)
-				.addText((text) =>
-					text
-						.setValue(pluginSettings.selectionReplacementTemplates)
-						.onChange(async (value) => {
+				.addText((text) => {
+					bindCommittedTextSetting(
+						text,
+						() => pluginSettings.selectionReplacementTemplates,
+						(value) => {
 							pluginSettings.selectionReplacementTemplates = value;
-							await this.plugin.saveSettings();
-						}),
-				);
+						},
+						{ triggerReload: true },
+					);
+				});
 			new Setting(containerEl)
 				.setName("Default field list")
 				.setDesc(
 					"What fields to expect if they template does not specify with {{template-input}}",
 				)
-				.addText((text) =>
-					text
-						.setValue(pluginSettings.rawInputFieldList)
-						.onChange(async (value) => {
+				.addText((text) => {
+					bindCommittedTextSetting(
+						text,
+						() => pluginSettings.rawInputFieldList,
+						(value) => {
 							pluginSettings.rawInputFieldList = value;
-							await this.plugin.saveSettings();
-						}),
-				);
+						},
+						{ triggerReload: true },
+					);
+				});
 
 			new Setting(containerEl)
 				.setName("Selection split")
 				.setDesc(
 					'A regex to split up the input selection to fill in extra fields in the note creation box. Should default to "\\s+-\\s+"',
 				)
-				.addText((text) =>
-					text
-						.setValue(pluginSettings.inputSplitPattern)
-						.onChange(async (value) => {
+				.addText((text) => {
+					bindCommittedTextSetting(
+						text,
+						() => pluginSettings.inputSplitPattern,
+						(value) => {
 							pluginSettings.inputSplitPattern = value;
-							await this.plugin.saveSettings();
-						}),
-				);
+						},
+						{ triggerReload: true },
+					);
+				});
 			new Setting(containerEl)
 				.setName("Input Suggestions")
 				.setDesc(
@@ -220,8 +367,13 @@ export class FT_SettingTab extends PluginSettingTab {
 					toggle
 						.setValue(pluginSettings.enableInputSuggestions)
 						.onChange(async (value) => {
-							pluginSettings.enableInputSuggestions = value;
-							await this.plugin.saveSettings();
+							await saveIfChanged(
+								pluginSettings.enableInputSuggestions,
+								value,
+								() => {
+									pluginSettings.enableInputSuggestions = value;
+								},
+							);
 						}),
 				);
 		}

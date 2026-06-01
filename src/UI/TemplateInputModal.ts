@@ -24,7 +24,13 @@ import {
 import { FT_BuildInFields } from "../BuildIn.js";
 //TODO import { DateTime } from "luxon";
 import { LinkSuggest, overrideVaultFileName, TagSuggest, TemplateStatusView } from "./utils.js";
-import { capitalize, parseCsvStringList } from "../utils.js";
+import {
+	buildVaultFilePath,
+	capitalize,
+	isUnsafeVaultFolderPath,
+	normalizeVaultFolderPath,
+	parseCsvStringList,
+} from "../utils.js";
 import { FT_TemplateProcessor } from "../TemplateProcessing.js";
 import { computedRef, Computed, ref, Reactive } from "./Signals.js";
 import { OverrideError } from "../ErrorHandling.js";
@@ -81,7 +87,7 @@ export class FT_TemplateInputModal extends Modal {
 		this._pathRef = ref("");
 		this._destination = computedRef(
 			[this._pathRef, this._nameRef],
-			() => `${this._pathRef.value}/${this._nameRef.value}.md`,
+			() => buildVaultFilePath(this._pathRef.value, this._nameRef.value),
 		);
 
 		// Command Trigger Stage -> Input Gathering Stage
@@ -138,6 +144,8 @@ export class FT_TemplateInputModal extends Modal {
 		this._destinationInfo_RenderName = undefined;
 		this._destinationInfoPathFields = {};
 		this._destinationInfoRenderPath = undefined;
+		this._nameIsResolved = false;
+		this._pathIsResolved = false;
 		
 		// Dinamic Name
 		this._mustResolveName = this._processor.isValidTemplate(this._settings.temptativeFileName);
@@ -158,6 +166,17 @@ export class FT_TemplateInputModal extends Modal {
 		}
 		
 		// Dinamic Path
+		const rawBaseOutputPath = this._settings.temptativeOutputFolder;
+		const normalizedBaseOutputPath = normalizeVaultFolderPath(rawBaseOutputPath);
+		if (isUnsafeVaultFolderPath(rawBaseOutputPath)) {
+			console.warn(
+				`Unsafe default output path '${rawBaseOutputPath}' detected. Falling back to vault root.`,
+			);
+			this._settings.temptativeOutputFolder = "";
+		} else {
+			this._settings.temptativeOutputFolder = normalizedBaseOutputPath;
+		}
+
 		this._mustResolvePath = this._processor.isValidTemplate(this._settings.temptativeOutputFolder);
 		if (this._mustResolvePath) {
 			console.info("Directory must be resolved");
@@ -174,11 +193,14 @@ export class FT_TemplateInputModal extends Modal {
 			}
 		} else{
 			this._settings.outputDirectory = this._settings.temptativeOutputFolder;
+			this._pathIsResolved = true;
 		}
 
 		// Sync reactive refs with current output values before rendering UI.
 		this._nameRef.value = this._settings.outputFileName || this._settings.temptativeFileName;
-		this._pathRef.value = this._settings.outputDirectory || this._settings.temptativeOutputFolder;
+		this._pathRef.value = this._mustResolvePath
+			? this._settings.temptativeOutputFolder
+			: this._settings.outputDirectory;
 
 		//A nice Builder Pattern Here
 		this.addHeader()
@@ -279,23 +301,18 @@ export class FT_TemplateInputModal extends Modal {
 		const settings = this._settings;
 		if (!settings) return this;
 
-		/*
-		 !Not a good idea to extract from here.
-		 * - EXTERNAL DEPENDENCIES (Side-effects):
-		 * - settings: Modified directly (from addFieldsSection scope)
-		 * - this._status: Calls setNeutral() (modifies UI state)
-		 * - this._settings: Read/Modified (instance property)
-		 * - this._mustResolveName: Read (instance flag)
-		 * - this._destinationInfoNameFields: Read/Modified (instance record, mutated)
-		 * - this._nameTemplate: Read (instance property)
-		 * - this._destinationInfoRenderName: Executed (function from instance)
-		 * - this._nameIsResolved: Modified (instance flag set to true)
-		 * - this._mustResolvePath: Read (instance flag)
-		 * - this._pathTemplate: Read (instance property)
-		 * - this._destinationInfoRenderPath: Executed (function from instance)
-		 * - this._pathIsResolved: Modified (instance flag set to true)
-		 * - this._nameRef/_pathRef: Modified (reactive destination dependencies)
-		*/
+		//Utilities.
+		const isFilled = (v: string) => v.trim().length > 0;
+		
+		const toPartialData = (fields: Record<string, string>) =>
+			Object.fromEntries(
+				Object.entries(fields).map(([k, v]) => [k, isFilled(v) ? v : `{{${k}}}`]),
+			)
+		;
+		
+		const allFilled = (fields: Record<string, string>) =>
+		  Object.values(fields).every((v) => isFilled(v));
+
 		/**
 		 * Updates the template data field and triggers dynamic name/path resolution.
 		 */
@@ -324,18 +341,12 @@ export class FT_TemplateInputModal extends Modal {
 						new Notice(attempt.error.message);
 						validName = attempt.error.cause.current;
 					}
-
-					//First we fill the apropiate destinationField
 					this._destinationInfoNameFields[id] = validName;
-					console.log("Destination name fields is resolved as\n", this._destinationInfoNameFields);
-
-					const name = this._destinationInfo_RenderName(this._destinationInfoNameFields);
+					const name = this._destinationInfo_RenderName(toPartialData(this._destinationInfoNameFields));
 					this._settings.outputFileName = name;
 					this._nameRef.value = name;
-					console.log(`Resolved name is: ${name}`);
-					this._nameIsResolved = true;
+					this._nameIsResolved = allFilled(this._destinationInfoNameFields);
 				}
-				// else console.log("is Not part of Name apparently"); // Debugging.
 			}
 
 			//Resolve path
@@ -343,11 +354,20 @@ export class FT_TemplateInputModal extends Modal {
 				const isPartOfPath = this._destinationInfoPathFields[id] !== undefined;
 				if(isPartOfPath){
 					this._destinationInfoPathFields[id] = newValue;
-					const path = this._destinationInfoRenderPath(this._destinationInfoPathFields);
-					console.log(`Resolved path is: ${path}`);
-					this._pathIsResolved = true;
-					this._settings.outputDirectory = path;
-					this._pathRef.value = path;
+					const renderedPath = this._destinationInfoRenderPath(toPartialData(this._destinationInfoPathFields));
+					const safePath = isUnsafeVaultFolderPath(renderedPath)
+						? ""
+						: normalizeVaultFolderPath(renderedPath);
+
+					if (safePath === "" && renderedPath.trim() !== "" && isUnsafeVaultFolderPath(renderedPath)) {
+						console.warn(
+							`Unsafe dynamic output path '${renderedPath}' detected. Falling back to vault root.`,
+						);
+					}
+
+					this._settings.outputDirectory = safePath;
+					this._pathRef.value = safePath;
+					this._pathIsResolved = allFilled(this._destinationInfoPathFields);
 				}
 			}
 		};
@@ -622,6 +642,17 @@ export class FT_TemplateInputModal extends Modal {
 		// Execute Template Event
 		const submit = async () => {
 			try {
+				const normalizedTargetPath = normalizeVaultFolderPath(finalSettings.outputDirectory);
+				if (isUnsafeVaultFolderPath(finalSettings.outputDirectory)) {
+					console.warn(
+						`Unsafe output path '${finalSettings.outputDirectory}' detected on submit. Falling back to vault root.`,
+					);
+					finalSettings.outputDirectory = "";
+					this._pathRef.value = "";
+				} else {
+					finalSettings.outputDirectory = normalizedTargetPath;
+				}
+
 				if(this._mustResolveName && !this._nameIsResolved) {
 					new Notice("Destination Name is not resolved yet");
 					return;
