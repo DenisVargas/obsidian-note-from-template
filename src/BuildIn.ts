@@ -38,10 +38,10 @@ export const FT_BuildInFields = new Map<string, TemplateField>([
     ],
     [
         "date&time",
-        { id: "date&time", value:"", inputType: "no-render", args: [""], description: "Current Date & Time (Obsidian YAML frontmatter compatible)", replaceOnly:true },
+        { id: "date&time", value:"now", inputType: "no-render", args: ["yyyy-MM-dd'T'HH:mm"], description: "Current Date & Time (Obsidian YAML frontmatter compatible)", replaceOnly:true },
     ],
     [
         "date",
-        { id: "date", value:"", inputType: "currentDate", args: ["yyyy-MM-dd"], format: "yyyy-MM-dd", description: "Current date", replaceOnly:true },
+        { id: "date", value:"now", inputType: "currentDate", args: ["yyyy-MM-dd"], description: "Current date", replaceOnly:true },
     ],
 ]);
