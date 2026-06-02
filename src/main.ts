@@ -383,8 +383,8 @@ export default class FT_Plugin extends Plugin {
 			//NOTE: Comments are for how each field is displayed in settings pane
 
 			templateDirectoryPath: "templates", //Template Directory
-			selectionReplacementPolicy: "always", //Replace Selection
-			outputNoteHandling: "open-tab", //Create and Open Note
+			selectionReplacementPolicy: "selected-only", //Replace Selection
+			outputNoteHandling: "open", //Create and Open Note
 			temptativeOutputFolder: "", //Default output Directory
 			temptativeFileName: "{{title}}", //Default Template Name
 			outputDirectory: "", //Efective Directory - if temptativeOutputFolder is a template, this is the final"resolved" value.
