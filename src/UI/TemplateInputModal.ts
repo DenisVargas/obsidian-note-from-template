@@ -849,19 +849,29 @@ export class FT_TemplateInputModal extends Modal {
 				//Special cases {{date}}{{date&time}} standart obsidian types
 				// For inserting today use {{date}} but declar it in template-input first.
 				case "currentDate": {
-					const format = field.value || field.args?.[0] || "yyyy-MM-dd";
-					const currentValue = DateTime.now().toFormat(format);
 					const textComponent = new TextComponent(controlEl)
-						.setValue(currentValue)
+						.setValue(field.value)
 						.onChange((value) => {
-							const validation = validateDateString(value);
-							if (validation.ok) {
-								UpdateFieldValue(name, value, currentValue);
-							} else {
-								new Notice(`Invalid date: ${validation.error.message}`);
-							}
+							UpdateFieldValue(name, value, value);
 						});
 					textComponent.inputEl.size = 50;
+
+					textComponent.inputEl.onblur = () => {
+						const validation = validateDateString(textComponent.getValue());
+						if (!validation.ok) {
+							new Notice(`Invalid date: ${validation.error.message}`, 8000);
+							textComponent.setValue(field.default);
+							UpdateFieldValue(name, field.default, field.default);
+						}
+					};
+
+					textComponent.inputEl.onkeydown = (ev: KeyboardEvent) => {
+						if (ev.code === "Enter") {
+							textComponent.inputEl.blur();
+							if (!ev.ctrlKey) ProceedToNextField(index);
+						}
+					};
+
 					return textComponent.inputEl;
 				}
 			}

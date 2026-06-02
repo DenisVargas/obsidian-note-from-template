@@ -111,6 +111,8 @@ export type TemplateField = {
 	//? The idea here is to use this to contain the final value.
 	value: string;
 
+	default: string;
+
     /**
      * Determines which input control is rendered for this field in the modal.
      * @see inputControlType in TemplateInputModal.ts

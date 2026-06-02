@@ -64,7 +64,6 @@ export class FT_TemplateProcessor {
 		this._plugin.eventBus.addEventListener(
 			FT_DomEventId.ExecuteTemplate,
 			(event: Event) => {
-				console.debug("Execute Template has ben called!");
 				const executeEvent = event as ExecuteTemplateEvent;
 				const { templateId, inputData, finalSettings } = executeEvent.detail;
 
@@ -383,9 +382,9 @@ export class FT_TemplateProcessor {
 			const policy = finalSettings.selectionReplacementPolicy;
 			const editor = finalSettings.editorReference;
 			const selection = editor.getSelection();
-			console.log(`Current SElection is ${selection}\nPolicy set as ${policy}`);
+			// console.debug(`Current SElection is ${selection}\nPolicy set as ${policy}`);
 			if(policy === "always" || policy === "selected-only"){
-				console.debug("Should replace selection");
+				// console.debug("Should replace selection");
 				const replaceMentTemplate = compile(
 					normalizeHandlebarsBuiltInTokens(selection),
 				);
@@ -653,8 +652,7 @@ export class FT_TemplateProcessor {
 		}
 
 		const filePath = buildVaultFilePath(safeOutputPath, fileName);
-		console.log("Target Path")
-		console.log(filePath);
+		// console.log("Target Path" + filePath);
 		await this._plugin.createFolderIfNeeded(safeOutputPath);
 		const newFile = await this._vault.create(filePath, content);
 		return newFile;
@@ -695,6 +693,7 @@ export class FT_TemplateProcessor {
 				: {
 					id: fieldSpec.id,
 					value: "",
+					default:"",
 					inputType: "text",
 					description: "",
 					args: [],
