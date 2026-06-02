@@ -37,6 +37,13 @@ import {
 import { FT_BuildInFields } from "./BuildIn.js";
 
 type TemplateCacheMap = Record<string, TemplateCacheEntry>;
+type NormalizedTemplateInputField = {
+	id: string;
+	value?: string;
+	inputType?: TemplateField["inputType"];
+	args?: string[];
+	description?: string;
+};
 export type PreparedTemplate = {
 	fieldNames: Record<string, string>;
 	render: (data:Record<string,unknown>) => string;
@@ -125,29 +132,11 @@ export class FT_TemplateProcessor {
 		}
 
 		const rawTemplateInput = rawSettings["template-input"];
-		const templateInputFields =
-			typeof rawTemplateInput === "string"
-				? parseCsvStringList(rawTemplateInput)
-				: Array.isArray(rawTemplateInput)
-					? rawTemplateInput
-						.map((value) => String(value).trim())
-						.filter(Boolean)
-					: [];
-
-		if (templateInputFields.length > 0) {
-			const finalInputFieldList = [
-				...new Set([
-					...parseCsvStringList(resolved.rawInputFieldList),
-					...templateInputFields,
-				]),
-			];
-			resolved.rawInputFieldList = finalInputFieldList.join(",");
-			resolved.fields = this.parseTemplateInputFields(finalInputFieldList);
-		} else {
-			resolved.fields = this.parseTemplateInputFields(
-				parseCsvStringList(resolved.rawInputFieldList),
-			);
-		}
+		const globalSpecs = parseCsvStringList(resolved.rawInputFieldList).map((id) => ({ id }));
+		const templateSpecs = this.normalizeTemplateInput(rawTemplateInput);
+		const mergedSpecs = this.mergeTemplateInputSpecs(globalSpecs, templateSpecs);
+		resolved.rawInputFieldList = mergedSpecs.map((field) => field.id).join(",");
+		resolved.fields = this.parseTemplateInputFields(mergedSpecs);
 
 		if (typeof rawSettings["template-filename"] === "string") {
 			if (containsFilenameToken(rawSettings["template-filename"])) {
@@ -677,40 +666,145 @@ export class FT_TemplateProcessor {
 		return r;
 	}
 
-	private parseTemplateInputFields(templateInputList: string[]): Map<string, TemplateField> {
-		return templateInputList.reduce<Map<string, TemplateField>>((acc, declaredField) => {
-			//BuildIn contains default values for fields, renderable fields like ("title" & "body")
-			// must be present in settings to be listed. Otherwise they are ignored.
-			const builtIn = FT_BuildInFields.get(declaredField);
-	
-			if (builtIn) {
-				// Defensive copy
-				acc.set(declaredField, {
+	private parseTemplateInputFields(templateInputList: NormalizedTemplateInputField[]): Map<string, TemplateField> {
+		return templateInputList.reduce<Map<string, TemplateField>>((acc, fieldSpec) => {
+			const builtIn = FT_BuildInFields.get(fieldSpec.id);
+
+			const nextField: TemplateField = builtIn
+				? {
 					...builtIn,
-					id: declaredField,
+					id: fieldSpec.id,
 					args: builtIn.args ? [...builtIn.args] : [],
 					alternatives: builtIn.alternatives ? [...builtIn.alternatives] : [],
-				});
-				return acc;
-			}
+				}
+				: {
+					id: fieldSpec.id,
+					value: "",
+					inputType: "text",
+					description: "",
+					args: [],
+					alternatives: [],
+					replaceOnly: false,
+				};
 
-			//Special cases: templateResult, date&time, date
-			//They are filled with default values, but final values
-			// are resolved at execution stage.
-	
-			// Campo no built-in: default básico
-			acc.set(declaredField, {
-				id: declaredField,
-				value: "",
-				inputType: "text",
-				description: "",
-				args: [],
-				alternatives: [],
-				replaceOnly: false,
-			});
-	
+			if (fieldSpec.value !== undefined) nextField.value = fieldSpec.value;
+			if (fieldSpec.inputType !== undefined) nextField.inputType = fieldSpec.inputType;
+			if (fieldSpec.description !== undefined) nextField.description = fieldSpec.description;
+			if (fieldSpec.args !== undefined) nextField.args = [...fieldSpec.args];
+
+			acc.set(fieldSpec.id, nextField);
 			return acc;
 		}, new Map<string, TemplateField>());
+	}
+
+	private mergeTemplateInputSpecs(
+		baseSpecs: NormalizedTemplateInputField[],
+		overrideSpecs: NormalizedTemplateInputField[],
+	): NormalizedTemplateInputField[] {
+		const merged = new Map<string, NormalizedTemplateInputField>();
+
+		for (const spec of baseSpecs) {
+			merged.set(spec.id, { ...spec });
+		}
+
+		for (const spec of overrideSpecs) {
+			const current = merged.get(spec.id);
+			merged.set(spec.id, {
+				...(current ?? { id: spec.id }),
+				...spec,
+				id: spec.id,
+			});
+		}
+
+		return Array.from(merged.values());
+	}
+
+	private normalizeTemplateInput(rawTemplateInput: unknown): NormalizedTemplateInputField[] {
+		if (typeof rawTemplateInput === "string") {
+			return parseCsvStringList(rawTemplateInput).map((id) => ({ id }));
+		}
+
+		if (!Array.isArray(rawTemplateInput)) return [];
+
+		const out: NormalizedTemplateInputField[] = [];
+		for (const entry of rawTemplateInput) {
+			const normalized = this.normalizeTemplateInputEntry(entry);
+			if (normalized) out.push(normalized);
+		}
+
+		return out;
+	}
+
+	private normalizeTemplateInputEntry(entry: unknown): NormalizedTemplateInputField | null {
+		if (typeof entry === "string") {
+			const id = entry.trim();
+			return id ? { id } : null;
+		}
+
+		if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+			console.warn("Invalid template-input entry. Expected string or object.", entry);
+			return null;
+		}
+
+		const record = entry as Record<string, unknown>;
+		const reservedKeys = new Set(["id", "value", "type", "inputType", "args", "description", "replaceOnly"]);
+
+		const explicitId = typeof record.id === "string" ? record.id.trim() : "";
+		const implicitIdKey = Object.keys(record).find((key) => !reservedKeys.has(key));
+		const id = explicitId || (implicitIdKey ? implicitIdKey.trim() : "");
+
+		if (!id) {
+			console.warn("Invalid template-input object entry. Missing id.", entry);
+			return null;
+		}
+
+		const normalized: NormalizedTemplateInputField = { id };
+		const implicitValue = implicitIdKey ? record[implicitIdKey] : undefined;
+		const explicitValue = record.value;
+
+		const inferredInputType = record.type ?? record.inputType;
+		if (typeof inferredInputType === "string" && inferredInputType.trim()) {
+			normalized.inputType = inferredInputType.trim() as TemplateField["inputType"];
+		}
+
+		if (typeof record.description === "string") {
+			normalized.description = record.description;
+		}
+
+		if (Array.isArray(record.args)) {
+			normalized.args = record.args.map((item) => String(item));
+		}
+
+		if (typeof explicitValue === "string") {
+			normalized.value = explicitValue;
+		} else if (
+			implicitValue !== undefined &&
+			implicitValue !== null &&
+			typeof implicitValue !== "object"
+		) {
+			normalized.value = String(implicitValue);
+		} else if (
+			implicitValue &&
+			typeof implicitValue === "object" &&
+			!Array.isArray(implicitValue)
+		) {
+			const nested = implicitValue as Record<string, unknown>;
+			const nestedType = nested.type ?? nested.inputType;
+			if (!normalized.inputType && typeof nestedType === "string" && nestedType.trim()) {
+				normalized.inputType = nestedType.trim() as TemplateField["inputType"];
+			}
+			if (!normalized.description && typeof nested.description === "string") {
+				normalized.description = nested.description;
+			}
+			if (!normalized.args && Array.isArray(nested.args)) {
+				normalized.args = nested.args.map((item) => String(item));
+			}
+			if (normalized.value === undefined && nested.value !== undefined && nested.value !== null) {
+				normalized.value = String(nested.value);
+			}
+		}
+
+		return normalized;
 	}
 
 	/**

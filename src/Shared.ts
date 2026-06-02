@@ -76,8 +76,19 @@ export interface TemplateResult {
  * Describes a single input field declared inside a template.
  * Used to build the input UI and collect user data before template execution.
  *
- * Fields are parsed from the template's `template-input` frontmatter key,
- * following the format: `{{fieldID:fieldType:arg1:arg2|Description text}}`
+ * Fields are parsed from the template's `template-input` frontmatter key.
+ *
+ * Supported authoring formats:
+ * - Legacy CSV string: `template-input: title, body`
+ * - YAML list of ids: `template-input: [title, body]`
+ * - Compact YAML object with implicit id/value:
+ *   - `- title: "init"`
+ *   - `  type: text`
+ *   - `  args: [""]`
+ *   - `  description: Main Title`
+ *
+ * In compact YAML form, the first non-reserved key is interpreted as `id`.
+ * The `type` property is accepted as an alias of `inputType`.
  *
  * @example
  * // Template source:

@@ -77,6 +77,28 @@ tags:
 | template-should-replace | Should the template write text back to the document? "always", "sometimes" = only if text is selected, "never"| "sometimes" |
 | template-should-create | Should the template make and open a note? "none"=no note, "create"= create but don't open, "open"=create and open in current editor, "open-pane" = create and open in new pane, "open-tab" = open in new tab | "open-tab" |
 
+### template-input compact YAML syntax
+
+`template-input` supports legacy CSV and YAML list forms, and also a compact object syntax where the id is implicit.
+
+```yaml
+template-input:
+  - title: "The Best Title Ever"
+    type: text
+    args: [""]
+    description: Main Title
+  - body
+    type: area
+    description: The Note's content
+```
+
+Notes:
+- In compact object entries, the first non-reserved key is treated as the field id.
+- The initial value can be omited.
+- `type` is accepted as an alias for `inputType`.
+- `replaceOnly` is not required in `template-input`; built-ins keep their default behavior.
+- For ids like `date&time`, quote the key in YAML.
+
 ### Examples
 - Create a new note with a complex filename, then insert the title with a transclusion of the overview:
 ``` 
