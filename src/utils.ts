@@ -67,47 +67,6 @@ export function containsFilenameToken(value: string | undefined): boolean {
 }
 
 /**
- * Converts common Obsidian date/time format tokens into Luxon-compatible tokens.
- * Unknown tokens are preserved so the user's format keeps behaving as closely as possible.
- */
-export function normalizeObsidianDateFormat(format: string | undefined): string {
-	const source = (format ?? "").trim();
-	if (!source) return "yyyy-MM-dd";
-
-	const tokenMap: Array<[string, string]> = [
-		["YYYY", "yyyy"],
-		["yyyy", "yyyy"],
-		["YY", "yy"],
-		["MMMM", "LLLL"],
-		["MMM", "LLL"],
-		["MM", "MM"],
-		["M", "M"],
-		["DD", "dd"],
-		["D", "d"],
-		["dddd", "cccc"],
-		["ddd", "ccc"],
-		["dd", "cc"],
-		["HH", "HH"],
-		["H", "H"],
-		["hh", "hh"],
-		["h", "h"],
-		["mm", "mm"],
-		["m", "m"],
-		["ss", "ss"],
-		["s", "s"],
-		["A", "a"],
-		["a", "a"],
-	];
-
-	let normalized = source;
-	for (const [obsidianToken, luxonToken] of tokenMap) {
-		normalized = normalized.replaceAll(obsidianToken, luxonToken);
-	}
-
-	return normalized;
-}
-
-/**
  * Handlebars identifiers cannot contain '&'.
  * Normalize built-in tokens that include unsupported characters to safe aliases
  * while preserving the public token syntax used by templates and replacement text.

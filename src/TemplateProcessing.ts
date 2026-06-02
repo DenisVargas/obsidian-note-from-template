@@ -22,6 +22,7 @@ import {
 	Ok,
 	Err,
 } from "./ErrorHandling.js";
+import { processDate } from "./Dates.js";
 import { compile, parse, template } from "handlebars";
 import FT_Plugin from "./main.js";
 import { FT_TemplateInputModal } from "./UI/TemplateInputModal.js";
@@ -30,7 +31,6 @@ import {
 	containsFilenameToken,
 	isUnsafeVaultFolderPath,
 	normalizeHandlebarsBuiltInTokens,
-	normalizeObsidianDateFormat,
 	normalizeVaultFolderPath,
 	parseCsvStringList,
 } from "./utils.js";
@@ -287,15 +287,6 @@ export class FT_TemplateProcessor {
 						if (!hasTemplateOutputNoteHandlingOverride) {
 							preExecutionSettings.outputNoteHandling = this._plugin.settings.outputNoteHandling;
 						}
-						const vaultConfig = this._plugin.app.vault as Vault & {
-							getConfig?: (key: string) => string | undefined;
-						};
-						preExecutionSettings.obsidianDateFormat = normalizeObsidianDateFormat(
-							vaultConfig.getConfig?.("dateFormat"),
-						);
-						preExecutionSettings.obsidianTimeFormat = normalizeObsidianDateFormat(
-							vaultConfig.getConfig?.("timeFormat"),
-						);
 
 						preExecutionSettings.templateMetadata = meta;
 
@@ -348,15 +339,16 @@ export class FT_TemplateProcessor {
 		const outputNameRaw = String(finalSettings.outputFileName ?? "").trim();
 		const outputNameNoPath = outputNameRaw.split("/").pop() ?? outputNameRaw;
 		const runtimeFilename = outputNameNoPath.replace(/\.md$/i, "");
-		const dateField = finalSettings.fields.get("date");
-		const dateFormat = normalizeObsidianDateFormat(
-			dateField?.format ?? dateField?.args?.[0] ?? finalSettings.obsidianDateFormat,
-		);
+		
+		const runtimeDateTime = DateTime.local().toFormat("yyyy-MM-dd'T'HH:mm:ss");
 
-		const now = DateTime.local();
-		const runtimeDate = now.toFormat(dateFormat);
-		const runtimeFrontmatterDate = now.toFormat(finalSettings.obsidianDateFormat);
-		const runtimeDateTime = now.toFormat("yyyy-MM-dd'T'HH:mm:ss");
+		const dateField = finalSettings.fields.get("date");
+		const dateFormat = dateField?.format ?? dateField?.args?.[0] ?? finalSettings.obsidianDateFormat;
+		const rawDate = inputData.date as string | undefined;
+		const processed = processDate(rawDate ?? "now", dateFormat);
+		const runtimeDate = processed.userFriendlyDate;
+		const runtimeFrontmatterDate = processed.frontmatterSafeDate;
+
 		const bodyContext: Record<string, unknown> = {
 			...inputData,
 			filename: runtimeFilename,
@@ -368,10 +360,12 @@ export class FT_TemplateProcessor {
 			...bodyContext,
 			date: runtimeFrontmatterDate,
 		};
+
 		finalSettings.textReplacement_data.filename = runtimeFilename;
 		finalSettings.textReplacement_data["date"] = runtimeDate;
 		finalSettings.textReplacement_data["date&time"] = runtimeDateTime;
 		finalSettings.textReplacement_data.dateAndTime = runtimeDateTime;
+		
 		const outputFrontMatter =
 			renderFrontmatter?.(frontmatterContext) ?? "";
 		const outputBody = renderBody(bodyContext);

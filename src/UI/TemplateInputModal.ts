@@ -35,6 +35,7 @@ import {
 import { FT_TemplateProcessor } from "../TemplateProcessing.js";
 import { computedRef, Computed, ref, Reactive } from "./Signals.js";
 import { OverrideError } from "../ErrorHandling.js";
+import { validateDateString } from "../Dates.js";
 
 /**
  * Modal dialog that collects user input for filling out a template before writing the generated note.
@@ -376,7 +377,7 @@ export class FT_TemplateInputModal extends Modal {
 			let next = index + 1;
 			if(next > this._fieldElements.length - 1)
 				next = 0;
-			this._fieldElements[next].focus();
+			this._fieldElements[next]?.focus();
 		}
 
 		/* -------------------------------------------------------------------------- */
@@ -447,7 +448,7 @@ export class FT_TemplateInputModal extends Modal {
 
 	selectField(index: number) {
 		if (index >= 0 && index < this._fieldElements.length) {
-			this._fieldElements[index].focus();
+			this._fieldElements[index]?.focus();
 		}
 	}
 
@@ -738,7 +739,8 @@ export class FT_TemplateInputModal extends Modal {
 					textEl.onkeydown = (ev:KeyboardEvent) => {
 						if(ev.code === "Enter"){
 							UpdateFieldValue(name,textComponent.getValue(), "");
-							ProceedToNextField(index);
+							if(!ev.ctrlKey)
+								ProceedToNextField(index);
 						}
 					}
 					//! Unwanted side effects: interferes with tab & ctrl+num
@@ -851,7 +853,14 @@ export class FT_TemplateInputModal extends Modal {
 					const currentValue = DateTime.now().toFormat(format);
 					const textComponent = new TextComponent(controlEl)
 						.setValue(currentValue)
-						.onChange((value) => UpdateFieldValue(name, value, currentValue));
+						.onChange((value) => {
+							const validation = validateDateString(value);
+							if (validation.ok) {
+								UpdateFieldValue(name, value, currentValue);
+							} else {
+								new Notice(`Invalid date: ${validation.error.message}`);
+							}
+						});
 					textComponent.inputEl.size = 50;
 					return textComponent.inputEl;
 				}
