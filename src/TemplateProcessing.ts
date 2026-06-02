@@ -12,7 +12,7 @@ import {
     InputModalPayload,
     TemplateCacheEntry,
     TemplateRawData,
-    HandlebarsCompiledTemplate,
+	HandlebarsCompiledTemplate,
 	TemplateField,
 	iFT_PreExecutionSettings,
 	
@@ -211,16 +211,18 @@ export class FT_TemplateProcessor {
 
 			/* ---------------------------- Compile Template ---------------------------- */
 
-			let templateSource:string = "";
-			let compiledTemplate: HandlebarsCompiledTemplate;
-
-			if(Object.keys(rawFrontmatter).length > 0)
-				templateSource = `---\n${stringifyYaml(rawFrontmatter)}\n---\n${rawbody}`;
-			else
-				templateSource = rawbody;
+			let compiledBodyTemplate: HandlebarsCompiledTemplate;
+			let compiledFrontmatterTemplate: HandlebarsCompiledTemplate | undefined;
 
 			try {
-				compiledTemplate = compile(normalizeHandlebarsBuiltInTokens(templateSource));
+				compiledBodyTemplate = compile(
+					normalizeHandlebarsBuiltInTokens(rawbody),
+				);
+				if (Object.keys(rawFrontmatter).length > 0) {
+					compiledFrontmatterTemplate = compile(
+						normalizeHandlebarsBuiltInTokens(stringifyYaml(rawFrontmatter)),
+					);
+				}
 			} catch (error) {
 				console.warn(
 					`Couldn't compile template '${vaultFile.path}': ${error instanceof Error ? error.message : String(error)}`,
@@ -256,7 +258,8 @@ export class FT_TemplateProcessor {
 			const cacheEntry: TemplateCacheEntry = {
 				meta,
 				rawData,
-				compiledTemplate,
+				compiledBody: compiledBodyTemplate,
+				compiledFrontmatter: compiledFrontmatterTemplate,
 			};
 			if (nextCache[meta.id]) {
 				console.warn(
@@ -339,23 +342,42 @@ export class FT_TemplateProcessor {
 			throw new Error(`Template id '${templateId}' is not loaded in cache`)
 		}
 
-		const render = cached.compiledTemplate;
+		const renderBody = cached.compiledBody;
+		const renderFrontmatter = cached.compiledFrontmatter;
 
 		const outputNameRaw = String(finalSettings.outputFileName ?? "").trim();
 		const outputNameNoPath = outputNameRaw.split("/").pop() ?? outputNameRaw;
 		const runtimeFilename = outputNameNoPath.replace(/\.md$/i, "");
-		inputData.filename = runtimeFilename;
-		finalSettings.textReplacement_data.filename = runtimeFilename;
+		const dateField = finalSettings.fields.get("date");
+		const dateFormat = normalizeObsidianDateFormat(
+			dateField?.format ?? dateField?.args?.[0] ?? finalSettings.obsidianDateFormat,
+		);
 
 		const now = DateTime.local();
-		const runtimeDate = now.toISODate() ?? now.toFormat("yyyy-MM-dd");
+		const runtimeDate = now.toFormat(dateFormat);
+		const runtimeFrontmatterDate = now.toFormat(finalSettings.obsidianDateFormat);
 		const runtimeDateTime = now.toFormat("yyyy-MM-dd'T'HH:mm:ss");
-		inputData["date"] = runtimeDate;
-		inputData["date&time"] = runtimeDateTime;
-		inputData.dateAndTime = runtimeDateTime;
+		const bodyContext: Record<string, unknown> = {
+			...inputData,
+			filename: runtimeFilename,
+			date: runtimeDate,
+			"date&time": runtimeDateTime,
+			dateAndTime: runtimeDateTime,
+		};
+		const frontmatterContext: Record<string, unknown> = {
+			...bodyContext,
+			date: runtimeFrontmatterDate,
+		};
+		finalSettings.textReplacement_data.filename = runtimeFilename;
 		finalSettings.textReplacement_data["date"] = runtimeDate;
 		finalSettings.textReplacement_data["date&time"] = runtimeDateTime;
 		finalSettings.textReplacement_data.dateAndTime = runtimeDateTime;
+		const outputFrontMatter =
+			renderFrontmatter?.(frontmatterContext) ?? "";
+		const outputBody = renderBody(bodyContext);
+		const OutputFileContent: string = outputFrontMatter
+			? `---\n${outputFrontMatter}\n---\n${outputBody}`
+			: outputBody;
 
 		//* AVIABLE
 		// const { id, name: name, path } = cached.meta;
@@ -394,7 +416,6 @@ export class FT_TemplateProcessor {
 			finalSettings.outputDirectory = targetPath;
 
 			const targetFileName = finalSettings.outputFileName;
-			const OutputFileContent: string = render(inputData); //* OK
 
 			//?: Should create a new file and place the rendered content as body.
 			let resultFile: TFile; //The new File created as a vault file reference.

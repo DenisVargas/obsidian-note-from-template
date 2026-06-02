@@ -729,8 +729,7 @@ export class FT_TemplateInputModal extends Modal {
 					const textComponent = new TextComponent(controlEl)
 						.setValue(defaultValue)
 						.onChange((newValue: string) => {
-							console.log("currentValue:");
-							console.log(textComponent.getValue());
+							// console.debug(`currentValue: ${textComponent.getValue()}`);
 							UpdateFieldValue(name, newValue, newValue)
 						});
 					textComponent.inputEl.size = 50;

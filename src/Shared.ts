@@ -139,6 +139,13 @@ export type TemplateField = {
      */
     args?: string[];
 
+	/**
+	 * Optional Luxon-compatible date/time format associated with this field.
+	 * Used by current-date style fields and by execution when frontmatter needs
+	 * to be forced into an Obsidian-compatible format.
+	 */
+	format?: string;
+
     /**
      * Alternative replacement strings associated with this field.
      * Intended for use in the Source Text Replacement section of the modal.
@@ -172,7 +179,8 @@ export type TemplateCacheEntry = {
 	 * inspect or reuse the original template data without reading the file again.
 	 */
 	rawData: TemplateRawData;
-	compiledTemplate: HandlebarsCompiledTemplate;
+	compiledBody: HandlebarsCompiledTemplate;
+	compiledFrontmatter?: HandlebarsCompiledTemplate;
 };
 
 /**
