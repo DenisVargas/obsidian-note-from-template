@@ -11,6 +11,7 @@ import {
     Notice,
 	KeymapEventHandler,
 } from "obsidian";
+import { DateTime } from "luxon";
 import FT_Plugin from "../main.js";
 import {
 	FT_DomEventId,
@@ -845,27 +846,22 @@ export class FT_TemplateInputModal extends Modal {
 	
 				//TODO: This is a special case, use {{date}} instead
 				//Special cases {{date}}{{date&time}} standart obsidian types
-				// For inserting today use {{today}}
-				// For inserting current hour use {{now}}
-				// Combining you can combine them like this: "{{today}}{{now}}"
-				// Or use {{date:format}}
-
-				// case "currentDate": {
-				// 	const fmt = field.args[0] || "yyyy-MM-dd";
-				// 	const cur = DateTime.now().toFormat(fmt);
-				// 	data[name] = cur;
-				// 	const textEl = new TextComponent(controlEl)
-				// 		.setValue(cur)
-				// 		.onChange((value) => UpdateFieldValue(name, value));
-				// 	textEl.inputEl.size = 50;
-				// 	return textEl.inputEl;
-				// }
+				// For inserting today use {{date}} but declar it in template-input first.
+				case "currentDate": {
+					const format = field.value || field.args?.[0] || "yyyy-MM-dd";
+					const currentValue = DateTime.now().toFormat(format);
+					const textComponent = new TextComponent(controlEl)
+						.setValue(currentValue)
+						.onChange((value) => UpdateFieldValue(name, value, currentValue));
+					textComponent.inputEl.size = 50;
+					return textComponent.inputEl;
+				}
 			}
 		} catch (error) {
 			console.error(error)
 		}
 
-		return new HTMLDivElement();
+		return controlEl;
 	}
 
 	private registerFieldShortcuts(): void {
