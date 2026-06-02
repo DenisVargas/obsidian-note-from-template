@@ -7,6 +7,7 @@
  * This module accepts ISO-like input and can also return a user-facing Luxon-formatted string.
  */
 import { DateTime } from "luxon";
+import { Ok, Err, Result } from "./ErrorHandling.js"; // Adjust path as needed
 
 /**
  * Converts an input date string into:
@@ -84,4 +85,73 @@ export function processDate(
   }
 
   return { userFriendlyDate: luxonDate, frontmatterSafeDate };
+}
+
+
+
+/**
+ * Validates whether a string is "now" (case‑insensitive) or a valid ISO 8601 date/time string.
+ * @param input - The string to validate.
+ * @returns Result<string, Error> - Ok with the original string if valid, or Err with an Error describing the failure.
+ */
+export function validateDateString(input: string): Result<string, Error> {
+    const trimmed = input.trim();
+
+    // 1. "now" (case insensitive)
+    if (/^now$/i.test(trimmed)) {
+        return Ok(trimmed);
+    }
+
+    // 2. ISO 8601 patterns (extended and basic)
+    // Extended date only: YYYY-MM-DD
+    const isoDateExt = /^\d{4}-\d{2}-\d{2}$/;
+    // Extended date+time: YYYY-MM-DDThh:mm:ss[.sss][Z|±hh:mm|±hhmm]
+    const isoDateTimeExt = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[\+\-]\d{2}:?\d{2})?$/;
+    // Basic date only: YYYYMMDD
+    const isoDateBasic = /^\d{8}$/;
+    // Basic date+time: YYYYMMDDThhmmss[.sss][Z|±hhmm|±hh:mm]
+    const isoDateTimeBasic = /^\d{8}T\d{6}(\.\d{1,3})?(Z|[\+\-]\d{2}:?\d{2})?$/;
+
+    if (isoDateExt.test(trimmed)) {
+        return Ok(trimmed);
+    }
+    if (isoDateTimeExt.test(trimmed)) {
+        return Ok(trimmed);
+    }
+    if (isoDateBasic.test(trimmed)) {
+        return Ok(trimmed);
+    }
+    if (isoDateTimeBasic.test(trimmed)) {
+        return Ok(trimmed);
+    }
+
+    // 3. Detailed error analysis for common mistakes
+    if (/[^0-9TZ+\-:. ]/i.test(trimmed)) {
+        // Contains characters not allowed in ISO8601 or 'now'
+        const invalidChars = trimmed.match(/[^0-9TZ+\-:. ]/g);
+        return Err(new Error(`Invalid character(s): ${[...new Set(invalidChars)].join(', ')}`));
+    }
+
+    if (trimmed.includes('T')) {
+        // Has 'T' but does not match the date+time pattern
+        if (!/^\d{4}-\d{2}-\d{2}T/.test(trimmed) && !/^\d{8}T/.test(trimmed)) {
+            return Err(new Error("Invalid date format before 'T': expected YYYY-MM-DD or YYYYMMDD"));
+        }
+        const afterT = trimmed.split('T')[1];
+        if (afterT && !/^\d{2}:\d{2}:\d{2}/.test(afterT) && !/^\d{6}/.test(afterT)) {
+            return Err(new Error("Invalid time format after 'T': expected hh:mm:ss or hhmmss"));
+        }
+        return Err(new Error("Invalid overall date+time structure"));
+    }
+
+    // Validate length and numeric composition
+    const digitsOnly = trimmed.replace(/[^0-9]/g, '');
+    if (digitsOnly.length === 8) {
+        return Err(new Error("Invalid basic date format: expected 8 digits (YYYYMMDD), but the string contains disallowed separators"));
+    }
+    if (digitsOnly.length === 14) {
+        return Err(new Error("Invalid basic datetime format: expected 14 digits (YYYYMMDDThhmmss)"));
+    }
+
+    return Err(new Error("Not 'now' nor a valid ISO 8601 string (supported formats: YYYY-MM-DD, YYYY-MM-DDThh:mm:ss[.sss][Z|±hh:mm], YYYYMMDD, YYYYMMDDThhmmss[.sss][Z|±hhmm])"));
 }
