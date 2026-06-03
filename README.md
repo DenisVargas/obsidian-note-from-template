@@ -291,7 +291,7 @@ When using YAML object mode, set `type` (alias of `inputType`) and optional `arg
 | ---- | ---- | -------- | ------------------------------------- |
 | text | `args[0]` optional default value | Single-line text input | `- title: "My Note"` + `type: text` |
 | area | `args[0]` optional default value | Multi-line textarea | `- body: ""` + `type: area` |
-| currentDate | format string in `value` or `args[0]` | Renders current date using Luxon format | `- date: "yyyy-LL-dd HH:mm:ss"` + `type: currentDate` |
+| currentDate | format string in `value` or `args[0]` | Editable date input pre‑filled with current date. Validates ISO 8601 / `"now"` on blur/Enter. Invalid values reset to `"now"`. Outputs `userFriendlyDate` (body) and `frontmatterSafeDate` (frontmatter). See [`docs/DateFormats.md`](docs/DateFormats.md). | `- date: "yyyy-LL-dd HH:mm:ss"` + `type: currentDate` |
 | choice | options list in `args` | Dropdown select | `- status: "draft"` + `type: choice` + `args: [draft, published]` |
 | multi | options list in `args` | Multi-select toggles | `- tags: ""` + `type: multi` + `args: [urgent, review, done]` |
 | no-render | none | Hidden field, no input control | built-ins like `filename`, `date&time`, `templateResult` |
@@ -300,6 +300,77 @@ Notes:
 - `note-title` exists in type definitions but is currently treated as legacy in the UI flow.
 - Built-ins can still be included in `template-input` as plain ids (for example: `date&time`, `body`, `tags`).
 - For keys like `date&time`, quote the YAML key when needed.
+
+## Built-In Fields
+
+The plugin registers these pre‑defined fields. They work without explicit
+`template-input` declarations, but some can be overridden.
+
+### `title`
+
+- **Input type:** `text`
+- Default field for the note title. Commonly used in filenames:
+  `template-filename: "{{title}}"`.
+
+### `body`
+
+- **Input type:** `area`
+- Multi‑line content field.
+
+### `tags`
+
+- **Input type:** `text`
+- When `enableInputSuggestions` is on, the input shows autocomplete suggestions
+  from existing vault tags.
+
+### `filename`
+
+- **Input type:** `no-render` (hidden, no UI)
+- Resolves to the final output filename (without `.md` extension or path).
+
+### `templateResult`
+
+- **Input type:** `no-render` (hidden, no UI)
+- Resolves to the fully rendered template output (frontmatter + body).
+- Useful for replacement‑only templates.
+
+### `date&time`
+
+- **Input type:** `no-render` (hidden, no UI)
+- Always resolves to the current moment in ISO‑like format:
+  `yyyy-MM-dd'T'HH:mm`.
+- Same value in both body and frontmatter contexts.
+- Does **not** appear in the UI modal.
+
+### `date`
+
+- **Input type:** `currentDate`
+- Default value: `"now"`
+- Default format (`args[0]`): `"yyyy-MM-dd"`
+- **Appears in the UI modal** as an editable text input (unlike `date&time`).
+- Validates user input on blur/Enter: accepts ISO 8601 or `"now"`. Invalid
+  values reset to `"now"`.
+- **Format override:** declare `date` explicitly in `template-input` to use a
+  different Luxon format:
+
+  ```yaml
+  template-input:
+    - date: "now"
+      args: ["dd/MM/yyyy"]
+      description: "Custom date format"
+  ```
+
+  The `args[0]` replaces the default `"yyyy-MM-dd"`.
+
+#### `date` vs `date&time`
+
+|                    | `date`                          | `date&time`                      |
+| ------------------ | ------------------------------- | -------------------------------- |
+| UI in modal        | ✅ Editable text field           | ❌ Hidden (`no-render`)          |
+| User input         | ✅ Validated (ISO / `"now"`)     | ❌ Always current moment          |
+| Body output        | Formatted per field's Luxon spec | `yyyy-MM-dd'T'HH:mm`             |
+| Frontmatter output | ISO 8601 (`frontmatterSafeDate`) | `yyyy-MM-dd'T'HH:mm`             |
+| Format override    | Via `value` or `args[0]`        | Not overridable                  |
 
 ## Non-field tags
 | Field | Description | Usage Example |
