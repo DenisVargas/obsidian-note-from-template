@@ -123,10 +123,7 @@ export default class FT_Plugin extends Plugin {
 
 			this.ensureTemplateDirectoryConfigured(settings);
 
-			const loadResult = await processor.loadFromDefaultLocation(
-				this.templateInputModal,
-				settings,
-			);
+			const loadResult = await processor.loadFromDefaultLocation(settings);
 			if (!loadResult.ok) {
 				console.error(loadResult.error.message);
 				return;

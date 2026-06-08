@@ -181,7 +181,6 @@ export class FT_TemplateProcessor {
 	 *   and do not abort processing of remaining templates.
 	 */
 	async loadFromDefaultLocation(
-		renderer: FT_TemplateInputModal, //! Unused for the time Being
 		settings: iFT_PluginSettings,
 	): Promise<Result<TemplateCacheMap, Error>> {
 		/* -------------------------------------------------------------------------- */
@@ -321,7 +320,7 @@ export class FT_TemplateProcessor {
 	 */
 	async executeTemplateById(
 		templateId: string,
-		inputData: Record<string, unknown>,
+		inputData: Record<string, string | string[]>,
 		finalSettings: ExtendedSettings
 	): Promise<void> {
 		/* -------------------------------------------------------------------------- */
@@ -329,11 +328,10 @@ export class FT_TemplateProcessor {
 		/* -------------------------------------------------------------------------- */
 		const cached = this.getCachedTemplate(templateId);
 		if (!cached) {
-			throw new Error(`Template id '${templateId}' is not loaded in cache`)
+			throw new Error(`Template id '${templateId}' is not loaded in cache`);
 		}
 
 		const renderBody = cached.compiledBody;
-		const renderFrontmatter = cached.compiledFrontmatter;
 
 		const outputNameRaw = String(finalSettings.outputFileName ?? "").trim();
 		const outputNameNoPath = outputNameRaw.split("/").pop() ?? outputNameRaw;
@@ -348,33 +346,34 @@ export class FT_TemplateProcessor {
 		const runtimeDate = processed.userFriendlyDate;
 		const runtimeFrontmatterDate = processed.frontmatterSafeDate;
 
-		const bodyContext: Record<string, unknown> = {
-			...inputData,
+		// console.debug("Input data is", inputData);
+		
+		const runtimeComputedValues: Record<string, unknown> = {			
 			filename: runtimeFilename,
 			date: runtimeDate,
 			"date&time": runtimeDateTime,
 			dateAndTime: runtimeDateTime,
+		}
+		const bodyContext: Record<string, unknown> = {
+			...inputData,
+			...runtimeComputedValues
 		};
+		// console.debug("Body Context is", bodyContext);
 		const frontmatterContext: Record<string, unknown> = {
-			...bodyContext,
-			date: runtimeFrontmatterDate,
+			...inputData,
+			...runtimeComputedValues,
+			date: runtimeFrontmatterDate, //Override.
 		};
-
-		finalSettings.textReplacement_data.filename = runtimeFilename;
-		finalSettings.textReplacement_data["date"] = runtimeDate;
-		finalSettings.textReplacement_data["date&time"] = runtimeDateTime;
-		finalSettings.textReplacement_data.dateAndTime = runtimeDateTime;
+		// console.debug("FrontMatter Context is", frontmatterContext);
+		const outputFrontMatter = this.renderFrontmatter(
+			cached.rawData.frontmatter,
+			frontmatterContext,
+		);
 		
-		const outputFrontMatter =
-			renderFrontmatter?.(frontmatterContext) ?? "";
 		const outputBody = renderBody(bodyContext);
 		const OutputFileContent: string = outputFrontMatter
 			? `---\n${outputFrontMatter}\n---\n${outputBody}`
 			: outputBody;
-
-		//* AVIABLE
-		// const { id, name: name, path } = cached.meta;
-		// const { frontmatter, template_settings, body } = cached.rawData;
 
 		/* ------------------------ Text (Editor) Replacement ----------------------- */
 
@@ -382,18 +381,18 @@ export class FT_TemplateProcessor {
 			const policy = finalSettings.selectionReplacementPolicy;
 			const editor = finalSettings.editorReference;
 			const selection = editor.getSelection();
-			// console.debug(`Current SElection is ${selection}\nPolicy set as ${policy}`);
+			// console.debug(`Current Selection is ${selection}\nPolicy set as ${policy}`);
 			if(policy === "always" || policy === "selected-only"){
 				// console.debug("Should replace selection");
 				const replaceMentTemplate = compile(
 					normalizeHandlebarsBuiltInTokens(selection),
 				);
-				const replaced = replaceMentTemplate(finalSettings.textReplacement_data);
+				const replaced = replaceMentTemplate(bodyContext);
 				editor.replaceSelection(replaced);
 			}
 		}
 
-		//TODO: Implement [MODE] for distintion between insertion and new File Creation.
+		//TODO: Implement [MODE] for distintion between insertion and new File Creation, next version.
 
 		/* ------------------------ File Creation and Opening ----------------------- */
 		try {
@@ -913,6 +912,133 @@ export class FT_TemplateProcessor {
 		
 		visit(node);
 		return out;
+	}
+
+	/**
+	 * Renders template frontmatter using the provided runtime context.
+	 *
+	 * Behavior summary:
+	 * - Recursively resolves Handlebars expressions inside frontmatter values.
+	 * - Expands array placeholders when a full-token value (for example `{{tags}}`) resolves to a list.
+	 * - Serializes the rendered object to YAML.
+	 * - Applies a post-processing merge for `tags` by combining existing rendered tags
+	 *   with `context.tags`, normalizing comma-separated strings, and removing duplicates.
+	 *
+	 * @param rawFrontmatter Frontmatter object extracted from the source template note.
+	 * @param context Runtime data used as render context for Handlebars expressions.
+	 * @returns A YAML string ready to be injected between frontmatter fences.
+	 */
+	private renderFrontmatter(
+		rawFrontmatter: Record<string, unknown>,
+		context: Record<string, unknown>,
+	): string {
+		if (!rawFrontmatter || Object.keys(rawFrontmatter).length === 0) return "";
+
+		const toStringArray = (value: unknown): string[] => {
+			if (value === undefined || value === null) return [];
+			if (Array.isArray(value)) {
+				return value.flatMap((item) => toStringArray(item));
+			}
+			if (typeof value === "string") {
+				return value
+					.split(",")
+					.map((item) => item.trim())
+					.filter(Boolean);
+			}
+			return [String(value)];
+		};
+
+		const renderNode = (node: unknown): unknown => {
+			if (typeof node === "string") {
+				const normalized = normalizeHandlebarsBuiltInTokens(node);
+
+				const tokenMatch =
+					normalized.match(/^{{\s*([A-Za-z0-9_.-]+)\s*}}$/) ||
+					normalized.match(/^{{{\s*([A-Za-z0-9_.-]+)\s*}}}$/);
+
+				if (tokenMatch) {
+					const resolved = this.resolveContextPath(context, tokenMatch[1]);
+					if (Array.isArray(resolved)) {
+						return resolved.map((item) => String(item));
+					}
+				}
+
+				try {
+					return compile(normalized)(context);
+				} catch (error) {
+					console.warn(
+						`Couldn't render frontmatter field '${node}': ${error instanceof Error ? error.message : String(error)}`,
+					);
+					return node;
+				}
+			}
+
+			if (Array.isArray(node)) {
+				const renderedItems: unknown[] = [];
+				for (const item of node) {
+					const rendered = renderNode(item);
+					if (Array.isArray(rendered)) {
+						renderedItems.push(...rendered);
+					} else {
+						renderedItems.push(rendered);
+					}
+				}
+				return renderedItems;
+			}
+
+			if (node && typeof node === "object") {
+				const renderedObject: Record<string, unknown> = {};
+				for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+					renderedObject[key] = renderNode(value);
+				}
+				return renderedObject;
+			}
+
+			return node;
+		};
+
+		const rendered = renderNode(rawFrontmatter);
+		const renderedYaml = stringifyYaml(rendered as Record<string, unknown>).trimEnd();
+
+		try {
+			const renderedObj = parseYaml(renderedYaml) as Record<string, unknown> | null;
+			if (!renderedObj || typeof renderedObj !== "object") return renderedYaml;
+
+			const templateTags = toStringArray(renderedObj["tags"]);
+			const contextTags = toStringArray(context["tags"]);
+			if (templateTags.length > 0 || contextTags.length > 0) {
+				renderedObj["tags"] = Array.from(new Set([...templateTags, ...contextTags]));
+			}
+
+			return stringifyYaml(renderedObj).trimEnd();
+		} catch (error) {
+			console.warn(
+				`Couldn't post-process frontmatter tags: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return renderedYaml;
+		}
+	}
+
+	/**
+	 * Resolves a dot-notated path against a context object.
+	 *
+	 * Example:
+	 * - path `author.name` resolves to `context.author.name` when available.
+	 *
+	 * Returns `undefined` if any intermediate segment is missing or not an object.
+	 *
+	 * @param context Source object used for path resolution.
+	 * @param path Dot-notated property path.
+	 * @returns The resolved value, or `undefined` when the path cannot be resolved.
+	 */
+	private resolveContextPath(
+		context: Record<string, unknown>,
+		path: string,
+	): unknown {
+		return path.split(".").reduce<unknown>((acc, key) => {
+			if (!acc || typeof acc !== "object") return undefined;
+			return (acc as Record<string, unknown>)[key];
+		}, context);
 	}
 }
 

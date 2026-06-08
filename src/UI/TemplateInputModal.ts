@@ -299,19 +299,14 @@ export class FT_TemplateInputModal extends Modal {
 	}
 
 	addFieldsSection(): this {
-		//TODO: There is a blocking between enter & shortcuts.
 		const settings = this._settings;
 		if (!settings) return this;
 
-		//Utilities.
 		const isFilled = (v: string) => v.trim().length > 0;
-		
 		const toPartialData = (fields: Record<string, string>) =>
 			Object.fromEntries(
 				Object.entries(fields).map(([k, v]) => [k, isFilled(v) ? v : `{{${k}}}`]),
-			)
-		;
-		
+			);
 		const allFilled = (fields: Record<string, string>) =>
 		  Object.values(fields).every((v) => isFilled(v));
 
@@ -319,7 +314,14 @@ export class FT_TemplateInputModal extends Modal {
 		 * Updates the template data field and triggers dynamic name/path resolution.
 		 */
 		const updateFieldValue = (id: string, newValue: string, oldValue: string) => {
-			settings.textReplacement_data[id] = newValue;
+			settings.textReplacement_data[id] = newValue; //TODO: Maybe blow this up.
+			
+			const fieldData = this._fields.get(id);
+			if(fieldData){
+				fieldData.value = newValue;
+				this._fields.set(id,fieldData)
+				console.log(`Updating ${id} with new value: ${newValue}`);
+			}
 			this._status.setNeutral();
 
 			if(!this._settings) return;
@@ -329,7 +331,6 @@ export class FT_TemplateInputModal extends Modal {
 			/* -------------------------------------------------------------------------- */
 			
 			// Dinamic Resolution of Output File Name.
-			//!Warning: This might require multiple fields, if template has more than just {{title}} or similar.
 			if(this._mustResolveName && this._destinationInfoNameFields && this._nameTemplate && this._destinationInfo_RenderName){
 				
 				/** If current field is part of _destinationInfoNameFields */
@@ -384,9 +385,14 @@ export class FT_TemplateInputModal extends Modal {
 		/*                               FIELDS HANDLING                              */
 		/* -------------------------------------------------------------------------- */
 
-		// * Fields is our input for the next stage!
-		console.debug("INCOMING FIELD MAP: \n", settings.fields);
-		this._fields = new Map(settings.fields); //Copia de settings.fields
+		// console.debug("INCOMING FIELD MAP: \n", settings.fields);
+		this._fields = new Map(settings.fields);
+
+		for (const [id, field] of this._fields.entries()) {
+			const initialValue = field.value ?? "";
+			settings.textReplacement_data[id] = initialValue;
+			updateFieldValue(id, initialValue, initialValue);
+		}
 
 		let order = 0;
 		this._fields.forEach((field, fieldID) => {
@@ -446,7 +452,7 @@ export class FT_TemplateInputModal extends Modal {
 		return this;
 	}
 
-	selectField(index: number) {
+	private selectField(index: number) {
 		if (index >= 0 && index < this._fieldElements.length) {
 			this._fieldElements[index]?.focus();
 		}
@@ -672,6 +678,19 @@ export class FT_TemplateInputModal extends Modal {
 
 				finalSettings.fields = this._fields;
 
+				for (const [id, field] of this._fields.entries()) {
+					if (id === "tags") continue;
+					finalSettings.textReplacement_data[id] = field.value ?? "";
+				}
+
+				const tags = this._fields.get("tags");
+				if(tags){
+					console.log("tags", tags);
+					const outputTagList = parseCsvStringList(tags.value);
+					console.log("output	Tag List", outputTagList);
+					finalSettings.textReplacement_data["tags"] = outputTagList;
+				}
+
 				this._plugin.eventBus.dispatchEvent(
 					new ExecuteTemplateEvent({
 						templateId: finalSettings.templateMetadata.id,
@@ -726,13 +745,15 @@ export class FT_TemplateInputModal extends Modal {
 			switch (inputType) {
 				case "text": {
 					// console.log(`Modifing ${name} with default ${initial}`);
-					const defaultValue = field.args ?  field.args[0] : "";
+					console.log(`Creando un text element para ${field.id}`);
+					const updateValue = (newValue: string) => {
+						// console.debug(`currentValue: ${textComponent.getValue()}`);
+						UpdateFieldValue(name, newValue, newValue)
+					};
+						const defaultValue = field.value ?? (field.args ? field.args[0] : "");
 					const textComponent = new TextComponent(controlEl)
 						.setValue(defaultValue)
-						.onChange((newValue: string) => {
-							// console.debug(`currentValue: ${textComponent.getValue()}`);
-							UpdateFieldValue(name, newValue, newValue)
-						});
+						.onChange(updateValue);
 					textComponent.inputEl.size = 50;
 						
 					textEl = textComponent.inputEl;
@@ -759,14 +780,14 @@ export class FT_TemplateInputModal extends Modal {
 
 					if (this._plugin.settings?.enableInputSuggestions) {
 						if (name === "tags")
-							new TagSuggest(textEl as HTMLInputElement, this.app, ()=>{ UpdateFieldValue(name, defaultValue, "") });
-						else new LinkSuggest(textEl as HTMLInputElement, this.app, ()=>{ UpdateFieldValue(name, defaultValue, "") });
+							new TagSuggest(textEl as HTMLInputElement, this.app, updateValue);
+						else new LinkSuggest(textEl as HTMLInputElement, this.app, updateValue);
 					}
 					return textEl;
 				}
 
 				case "area": {
-					const value = field.args ?  field.args[0] : "";
+						const value = field.value ?? (field.args ? field.args[0] : "");
 
 					const textAreaEl = new TextAreaComponent(controlEl)
 						.setValue(value)
@@ -784,40 +805,10 @@ export class FT_TemplateInputModal extends Modal {
 					// }
 					return textAreaEl.inputEl;
 				}
-
-				//TODO: make sure that filename is valid.
-
-				//! Deprecated in favor of arbitrary fields. Look for "Dynamic Output Name".
-				// case "note-title": {
-				// 	const value = field.args ? field.args[0] : "";
-				// 	const initial_safe = value.replace(BAD_CHARS_FOR_FILENAMES_MATCH, "");
-				// 	data[name] = initial_safe;
-
-				// 	const error = controlEl.createEl("div", {
-				// 		text:
-				// 			"Error! Characters not allowed in filenames: " +
-				// 			BAD_CHARS_FOR_FILENAMES_TEXT,
-				// 		cls: "from-template-error-text",
-				// 	});
-				// 	const updateError = (v: string) => {
-				// 		if (v.match(BAD_CHARS_FOR_FILENAMES_MATCH))
-				// 			error.removeAttribute("hidden");
-				// 		else error.setAttribute("hidden", "true");
-				// 	};
-				// 	updateError(initial_safe);
-				// 	const textComponent = new TextComponent(controlEl)
-				// 		.setValue(initial_safe)
-				// 		.onChange((value) => {
-				// 			UpdateFieldValue(name, value);
-				// 			updateError(value);
-				// 		});
-				// 	textComponent.inputEl.size = 50;
-				// 	return textComponent.inputEl;
-				// }
 	
 				case "choice": {
 					if(!field.args) return controlEl;
-					const value = field.args ?  field.args[0] : "";
+						const value = field.value ?? (field.args ? field.args[0] : "");
 
 					const opts: Record<string, string> = {};
 					field.args.forEach((f) => (opts[f] = capitalize(f)));
@@ -844,10 +835,9 @@ export class FT_TemplateInputModal extends Modal {
 					});
 					return spanEl;
 				}
-	
-				//TODO: This is a special case, use {{date}} instead
-				//Special cases {{date}}{{date&time}} standart obsidian types
-				// For inserting today use {{date}} but declar it in template-input first.
+
+				//Special case {{date&time}} standart Obsidian format.
+				//For inserting arbitrary dates use {{date}} by declaring it in template-input.
 				case "currentDate": {
 					const textComponent = new TextComponent(controlEl)
 						.setValue(field.value)

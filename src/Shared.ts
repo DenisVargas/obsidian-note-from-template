@@ -375,7 +375,7 @@ export class ExtendedSettings implements iFT_ExecutionSettings {
 	/**
 	 * Consumed by UI to display an Input per field as Record<string,string>
 	 */
-	textReplacement_data: Record<string, string>;
+	textReplacement_data: Record<string, string | string[]>;
 	/** 
 	 * Enables or disables the UI Replacement Section
 	 */
@@ -512,7 +512,7 @@ export enum FT_DomEventId {
  */
 export type TemplateExecutionPayload = {
 	readonly templateId: string;
-	readonly inputData: Record<string, string>;
+	readonly inputData: Record<string, string | string[]>;
 	readonly finalSettings: ExtendedSettings;
 	//! readonly replacementOptions: ReplacementOptions; Included within [ExtendedSettings]
 };
