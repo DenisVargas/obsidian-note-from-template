@@ -41,6 +41,7 @@ export default class FT_Plugin extends Plugin {
 		this.eventBus = document.createElement("div");
 		this.processor = new FT_TemplateProcessor(this);
 		this.settingsTab = new FT_SettingTab(this);
+		this.settings = undefined;
 
 		/* ------------------------------- Obsidian UI ------------------------------ */
 
