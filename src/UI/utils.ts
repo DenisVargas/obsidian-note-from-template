@@ -13,8 +13,8 @@ import {
 	Success,
 	Failed,
 	OverrideResult,
-	OverrideOption
-} from "../ErrorHandling.js"
+	OverrideOption,
+} from "../ErrorHandling.js";
 
 export class TemplateStatusView {
 	private readonly statusEl: HTMLElement;
@@ -203,7 +203,9 @@ export class ContentEditableTest extends Modal {
  * const fail = overrideVaultFileName("Daily:Note");
  * if (!fail.ok) console.log(fail.error.cause.attempted);
  */
-export function overrideVaultFileName(temptativeFileName:string): OverrideResult<string> {
+export function overrideVaultFileName(
+	temptativeFileName: string,
+): OverrideResult<string> {
 	const BAD_CHARS_FOR_FILENAMES_TEXT = ":[]?/\\";
 	const BAD_CHARS_FOR_FILENAMES_MATCH = /[:[\]?/\\]/g;
 
@@ -212,13 +214,12 @@ export function overrideVaultFileName(temptativeFileName:string): OverrideResult
 	const matches = Array.from(
 		temptativeFileName.matchAll(BAD_CHARS_FOR_FILENAMES_MATCH),
 		(match) => ({
-			char:match[0],
-			index: match.index ?? -1
-		})
+			char: match[0],
+			index: match.index ?? -1,
+		}),
 	);
 
-	if(matches.length > 0){
-
+	if (matches.length > 0) {
 		const matchedCharacter = matches[0].char;
 		/*
 			We replace bad characters, collapse duplicates and trim.
@@ -230,15 +231,18 @@ export function overrideVaultFileName(temptativeFileName:string): OverrideResult
 			.replace(/_+/g, "_")
 			.replace(/^_+|_+$/g, "")
 			.trim();
-		
+
 		const overrideParams: OverrideOption<string> = {
 			current: normalized,
-			attempted: temptativeFileName
-		}
+			attempted: temptativeFileName,
+		};
 
-		return Failed(`Do not use ${matchedCharacter}, the following characters are forbidden for filenames: ${BAD_CHARS_FOR_FILENAMES_TEXT}`, overrideParams);
+		return Failed(
+			`Do not use ${matchedCharacter}, the following characters are forbidden for filenames: ${BAD_CHARS_FOR_FILENAMES_TEXT}`,
+			overrideParams,
+		);
 	}
-	
+
 	return Success(temptativeFileName);
 }
 /**
@@ -251,11 +255,13 @@ export function overrideVaultFileName(temptativeFileName:string): OverrideResult
  * @param defaultValue Fallback value used when validation fails.
  * @returns OverrideResult<string> always in the success branch.
  */
-export function overrideVaultFileNameOrDefault(temptativeFileName:string, defaultValue:string): OverrideResult<string> {
+export function overrideVaultFileNameOrDefault(
+	temptativeFileName: string,
+	defaultValue: string,
+): OverrideResult<string> {
 	const attempt = overrideVaultFileName(temptativeFileName);
 
-	if(!attempt.ok)
-		return Success(defaultValue);
+	if (!attempt.ok) return Success(defaultValue);
 
 	return attempt;
 }

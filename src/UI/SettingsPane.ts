@@ -85,7 +85,11 @@ export class FT_SettingTab extends PluginSettingTab {
 		};
 
 		const bindCommittedTextSetting = (
-			text: { setValue: (value: string) => any; onChange: (cb: (value: string) => void) => any; inputEl: HTMLInputElement },
+			text: {
+				setValue: (value: string) => any;
+				onChange: (cb: (value: string) => void) => any;
+				inputEl: HTMLInputElement;
+			},
 			getCurrent: () => string,
 			applyNext: (value: string) => void,
 			options?: { triggerReload?: boolean },

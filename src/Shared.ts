@@ -21,21 +21,21 @@ export const TEMPLATE_FIELDS = [
 	"template-filename",
 	"template-should-replace",
 	"template-should-create",
-	"template-command-name"
+	"template-command-name",
 ];
 
 //* Replaces [shouldReplaceSelection]
 export type ReplacementStrategy = "always" | "selected-only" | "never";
 export type CreateType = "none" | "create" | "open" | "open-pane" | "open-tab";
 export type TemplateInputType =
-| "text"
-| "area"
-| "note-title"
-| "choice"
-| "multi"
-| "currentDate"
-| "no-render"
-| (string & {});
+	| "text"
+	| "area"
+	| "note-title"
+	| "choice"
+	| "multi"
+	| "currentDate"
+	| "no-render"
+	| (string & {});
 
 //! Deprecated: Included within ExtendedSettings
 // /*
@@ -95,51 +95,51 @@ export interface TemplateResult {
  * // {{title:text|Note title}}
  * // {{status:choice:draft:published|Publishing status}}
  * // {{body:area|Main content}}
- * 
+ *
  * @see https://github.com/mo-seph/obsidian-note-from-template#field-types
  */
 export type TemplateField = {
-    [key: string]: string | string[] | boolean | undefined;
-    /**
-     * Unique identifier for this field within the template.
-     * First segment of the field declaration. Used as the key in `textReplacement_data`
-     * and as the Handlebars variable name in the template body.
-     * @example "title", "body", "tags"
-     */
-    id: string;
+	[key: string]: string | string[] | boolean | undefined;
+	/**
+	 * Unique identifier for this field within the template.
+	 * First segment of the field declaration. Used as the key in `textReplacement_data`
+	 * and as the Handlebars variable name in the template body.
+	 * @example "title", "body", "tags"
+	 */
+	id: string;
 
 	//? The idea here is to use this to contain the final value.
 	value: string;
 
 	default: string;
 
-    /**
-     * Determines which input control is rendered for this field in the modal.
-     * @see inputControlType in TemplateInputModal.ts
-     * - `"text"` — Single-line text input (default)
-     * - `"area"` — Multi-line textarea
-     * - `"note-title"` — Text input with filename-safe character validation
-     * - `"choice"` — Dropdown with options from {@link args}
-     * - `"multi"` — Toggle group with options from {@link args}
-     * - `"currentDate"` — Auto-filled with current date, format from {@link args}[0]
+	/**
+	 * Determines which input control is rendered for this field in the modal.
+	 * @see inputControlType in TemplateInputModal.ts
+	 * - `"text"` — Single-line text input (default)
+	 * - `"area"` — Multi-line textarea
+	 * - `"note-title"` — Text input with filename-safe character validation
+	 * - `"choice"` — Dropdown with options from {@link args}
+	 * - `"multi"` — Toggle group with options from {@link args}
+	 * - `"currentDate"` — Auto-filled with current date, format from {@link args}[0]
 	 * - `"no-render"` — Updated via code, does not generate ui-fields.
-     */
-    inputType: TemplateInputType;
+	 */
+	inputType: TemplateInputType;
 
-    /**
-     * Human-readable hint displayed below the field label in the input modal.
-     * Parsed from the text after `|` in the field declaration.
-     * @example "The title of the new note"
-     */
-    description?: string;
+	/**
+	 * Human-readable hint displayed below the field label in the input modal.
+	 * Parsed from the text after `|` in the field declaration.
+	 * @example "The title of the new note"
+	 */
+	description?: string;
 
-    /**
-     * Positional arguments that configure the field's behaviour, depending on `inputType`:
-     * - `"text"` / `"note-title"`: args[0] is the default value
-     * - `"choice"` / `"multi"`: each arg is an option shown to the user
-     * - `"currentDate"`: args[0] is the Luxon format string (e.g. `"yyyy-MM-dd"`)
-     */
-    args?: string[];
+	/**
+	 * Positional arguments that configure the field's behaviour, depending on `inputType`:
+	 * - `"text"` / `"note-title"`: args[0] is the default value
+	 * - `"choice"` / `"multi"`: each arg is an option shown to the user
+	 * - `"currentDate"`: args[0] is the Luxon format string (e.g. `"yyyy-MM-dd"`)
+	 */
+	args?: string[];
 
 	/**
 	 * Optional Luxon-compatible date/time format associated with this field.
@@ -148,16 +148,16 @@ export type TemplateField = {
 	 */
 	format?: string;
 
-    /**
-     * Alternative replacement strings associated with this field.
-     * Intended for use in the Source Text Replacement section of the modal.
-     * !Currently unused in active code paths.
-     */
-    alternatives?: string[];
+	/**
+	 * Alternative replacement strings associated with this field.
+	 * Intended for use in the Source Text Replacement section of the modal.
+	 * !Currently unused in active code paths.
+	 */
+	alternatives?: string[];
 
 	//?: This does not generate an inputfield, but is listed on source text Replacement.
 	replaceOnly?: boolean;
-}
+};
 //Used by noteToTemplateData to extract front-matter & body.
 export type TemplateRawData = {
 	frontmatter: Record<string, any>;
@@ -256,7 +256,7 @@ export interface iFT_PluginSettings {
 }
 
 export interface iFT_PreExecutionSettings extends iFT_PluginSettings {
-	fields: Map<string,TemplateField>;
+	fields: Map<string, TemplateField>;
 }
 
 /*
@@ -269,16 +269,16 @@ export interface iFT_ExecutionSettings extends iFT_PreExecutionSettings {
 	obsidianDateFormat: string;
 	/** Current Obsidian-configured time format, normalized for runtime rendering. */
 	obsidianTimeFormat: string;
-	
+
 	//! Template specific. Replaced by [TemplateRawData]
 	/** Identifies the template (id, name, vault path) — used to register/invoke the command. */
 	templateMetadata: TemplateMetadata; //TODO: esto esta suplido tengo entendido.
-	/** 
+	/**
 	 * @deprecated use {@link TemplateRawData.body}
 	 * Raw markdown body of the template file (everything after the frontmatter).
 	 */
 	templateFileContent: string;
-	/** 
+	/**
 	 * @deprecated use {@link TemplateRawData.frontmatter}
 	 * Parsed YAML frontmatter of the template file as a key-value map.
 	 */
@@ -306,9 +306,9 @@ export interface iFT_ExecutionSettings extends iFT_PreExecutionSettings {
 
 export class ExtendedSettings implements iFT_ExecutionSettings {
 	/* ----------------------------- Global Settings ---------------------------- */
-	/** 
+	/**
 	 * @inheritDoc
-	 * @see iFT_PluginSettings.templateDirectoryPath 
+	 * @see iFT_PluginSettings.templateDirectoryPath
 	 */
 	templateDirectoryPath: string;
 	selectionReplacementPolicy: ReplacementStrategy;
@@ -327,17 +327,17 @@ export class ExtendedSettings implements iFT_ExecutionSettings {
 	temptativeFileName: string;
 	outputDirectory: string;
 	outputFileName: string;
-	/** 
+	/**
 	 * **Source File Replacement**
 	 *
 	 * This value comes from Globalsettings.
 	 * Should be a String with comma separated values.
-	 * 
+	 *
 	 * OverWritten by "template-replacement" if defined inside template.
-	 * 
+	 *
 	 * @example
 	 * "{{title}}, {{url}}, {{date}}"
-	 * 
+	 *
 	 * @default "{{title}}"
 	 */
 	selectionReplacementTemplates: string;
@@ -376,7 +376,7 @@ export class ExtendedSettings implements iFT_ExecutionSettings {
 	 * Consumed by UI to display an Input per field as Record<string,string>
 	 */
 	textReplacement_data: Record<string, string | string[]>;
-	/** 
+	/**
 	 * Enables or disables the UI Replacement Section
 	 */
 	isSelectionReplacementEnabled: boolean;
@@ -400,15 +400,18 @@ export class ExtendedSettings implements iFT_ExecutionSettings {
 	shouldReplaceSelection: ReplacementStrategy;
 	/* ----------------------- end of Deprecation section ----------------------- */
 
-
-	constructor(globalSettings: iFT_PreExecutionSettings, editorReference: Editor) {
+	constructor(
+		globalSettings: iFT_PreExecutionSettings,
+		editorReference: Editor,
+	) {
 		/* ----------------------------- Global Settings ---------------------------- */
 		this.templateDirectoryPath = globalSettings.templateDirectoryPath;
 		this.selectionReplacementPolicy = globalSettings.selectionReplacementPolicy;
 		this.outputNoteHandling = globalSettings.outputNoteHandling;
 		this.temptativeOutputFolder = globalSettings.temptativeOutputFolder;
 		this.temptativeFileName = globalSettings.temptativeFileName;
-		this.selectionReplacementTemplates = globalSettings.selectionReplacementTemplates;
+		this.selectionReplacementTemplates =
+			globalSettings.selectionReplacementTemplates;
 		this.rawInputFieldList = globalSettings.rawInputFieldList;
 		this.inputSplitPattern = globalSettings.inputSplitPattern;
 		this.enableInputSuggestions = globalSettings.enableInputSuggestions;
@@ -465,16 +468,22 @@ export class ExtendedSettings implements iFT_ExecutionSettings {
 		this.shouldReplaceSelection = "never";
 	}
 
-	private deepCopyFieldMap(fieldMap: Map<string,TemplateField>): Map<string,TemplateField> {
+	private deepCopyFieldMap(
+		fieldMap: Map<string, TemplateField>,
+	): Map<string, TemplateField> {
 		const copy = new Map(
-			Array.from(fieldMap.entries(), ([id, field]) => [
-				id,
-				{
-					...field,
-					args: field.args ? [...field.args] : [],
-					alternatives: field.alternatives ? [...field.alternatives] : [],
-				},
-			] as [string, TemplateField]),
+			Array.from(
+				fieldMap.entries(),
+				([id, field]) =>
+					[
+						id,
+						{
+							...field,
+							args: field.args ? [...field.args] : [],
+							alternatives: field.alternatives ? [...field.alternatives] : [],
+						},
+					] as [string, TemplateField],
+			),
 		);
 		return copy;
 	}

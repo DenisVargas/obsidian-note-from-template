@@ -132,18 +132,10 @@ export function buildVaultFilePath(folder: string, fileName: string): string {
  * - Root aliases ("", "/", "./") become "".
  * - Non-root values always end with "/".
  */
-export function normalizeSettingsOutputFolder(input: string | undefined): string {
+export function normalizeSettingsOutputFolder(
+	input: string | undefined,
+): string {
 	const normalized = normalizeVaultFolderPath(input);
 	if (!normalized) return "";
 	return normalized.endsWith("/") ? normalized : `${normalized}/`;
 }
-
-// //Utility for debugging
-// export function printObjectProperties(obj: Record<string, unknown>): string {
-// 	//If it gets a null or undefined object should not throw error.
-// 	if (!obj) return "";
-
-// 	return Object.entries(obj)
-// 		.map(([key, value]) => `${key}: ${String(value)}`)
-// 		.join("\n");
-// }

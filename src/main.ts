@@ -6,16 +6,8 @@ import {
 	type Editor,
 	type PluginManifest,
 	type TFile,
-	type WorkspaceLeaf,
 } from "obsidian";
-import {
-	FT_DomEventId,
-	type iFT_PluginSettings,
-	type TemplateResult,
-	type InputModalCloseEventPayload,
-	type ExecuteTemplateEvent,
-	ExtendedSettings,
-} from "./Shared.js";
+import { type iFT_PluginSettings } from "./Shared.js";
 import {
 	FT_SettingTab,
 	FT_FolderCreateModal,
@@ -25,7 +17,7 @@ import { FT_TemplateProcessor } from "./TemplateProcessing.js";
 import {
 	containsFilenameToken,
 	isUnsafeVaultFolderPath,
-	normalizeVaultFolderPath
+	normalizeVaultFolderPath,
 } from "./utils.js";
 
 export default class FT_Plugin extends Plugin {
@@ -60,7 +52,7 @@ export default class FT_Plugin extends Plugin {
 		const settings = await this.loadSettings(); //Explict load settings from disk
 		this.settings = settings;
 		this.addSettingTab(this.settingsTab);
-		
+
 		this.addCommand({
 			id: "reload",
 			name: "Re-index Templates",
@@ -68,8 +60,8 @@ export default class FT_Plugin extends Plugin {
 				this.indexTemplates(settings);
 			},
 		});
-		
-		if(!this.ensureTemplateDirectoryConfigured(settings)){
+
+		if (!this.ensureTemplateDirectoryConfigured(settings)) {
 			return;
 		}
 
@@ -85,13 +77,15 @@ export default class FT_Plugin extends Plugin {
 		console.log("unloading plugin");
 	}
 
-	private ensureTemplateDirectoryConfigured(settings: iFT_PluginSettings): boolean {
+	private ensureTemplateDirectoryConfigured(
+		settings: iFT_PluginSettings,
+	): boolean {
 		//If templateDirectoryPath is invalid or does not exists, prevent user to continue and open settings.
 		const folder = settings.templateDirectoryPath?.trim();
 		const isMissing = !folder;
 		const doesNotExist = folder ? !this.checkIfFolderExists(folder) : true;
 
-		if(isMissing){
+		if (isMissing) {
 			new Notice(
 				"Template Directory is required. Configure it in the plugin settings before using Note From Template.",
 				8000,
@@ -104,8 +98,8 @@ export default class FT_Plugin extends Plugin {
 				8000,
 			);
 		}
-		
-		if(isMissing || doesNotExist){
+
+		if (isMissing || doesNotExist) {
 			(this.app as any).setting.open();
 			(this.app as any).setting.openTabById(this.manifest.id);
 			return false;
@@ -119,7 +113,6 @@ export default class FT_Plugin extends Plugin {
 		const processor = this.processor;
 
 		if (processor) {
-
 			this.ensureTemplateDirectoryConfigured(settings);
 
 			const loadResult = await processor.loadFromDefaultLocation(settings);
@@ -134,165 +127,6 @@ export default class FT_Plugin extends Plugin {
 		}
 		console.info("Templates Reloaded");
 	}
-
-	//! This might be unnecesary, as of v1.4.4, aparently when onunload() is called commands associated to this plugin are garbage collected.
-	//! https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines#Clean+up+resources+when+plugin+unloads
-	// clearTemplateCommands() {
-	// 	//From https://liamca.in/Obsidian/API+FAQ/commands/unload+a+Command
-	// 	//Use this.removeCommand() instead
-	// 	this.addedCommands.forEach((cid) => {
-	// 		this.removeCommand(cid);
-	// 	});
-	// }
-
-	//! deprecated in favor of templateProcessor.loadFromDefaultLocation()
-	// /**
-	//  * Loads the selected template, gathers context from the active editor or view,
-	//  * and opens the input modal used to resolve template variables.
-	//  * @param templateId - The template identifier for the template being launched.
-	//  * @returns A promise that resolves once the template has been prepared and the modal opened.
-	//  */
-	// async launchTemplate(templateId: TemplateMetadata): Promise<void> {
-	// 	const view: MarkdownView | null =
-	// 		this.app.workspace.getActiveViewOfType(MarkdownView);
-
-	// 	if (view && this.processor && this.settings) {
-	// 		const editor: Editor | undefined = view.editor;
-	// 		const initial_selection = this.getCurrentSelection(editor);
-
-	// 		El flujo actual es invocar el inputModal para modificar el input que se le suministra al template.
-	// 		Luego ejecuar el template.
-	// 		Finalmente renderizar el resultado (escribir en disco donde corresponda).
-
-	// 		prepareTemplate is deprecated.
-	// 		Get the template text and the fields to fill in
-	// 		const templateResult = await this.processor.prepareTemplate(
-	// 			templateId,
-	// 			this.settings,
-	// 			initial_selection,
-	// 			this.settings.inputSplit
-	// 		)
-	// 		if (!templateResult.ok) {
-	// 			console.error(templateResult.error.message)
-	// 			return
-	// 		}
-	// 		const template = templateResult.value
-
-	// 		Can we fill in extra information here?
-	// 		if( view && view.file) {
-	// 			template.data['currentTitle'] = view.file.basename
-	// 			template.data['currentPath'] = view.file.path
-	// 		}
-
-	// 		const options:ReplacementOptions = {
-	// 			editor:editor,
-	// 			shouldReplaceSelection:editor ? template.template.replaceSelection : "never",
-	// 			shouldCreateOpen:template.template.createOpen,
-	// 			willReplaceSelection:editor ? true : false,
-	// 		}
-
-	// 		this.templateInputModal.openWith(template, options);
-	// 	}
-	// }
-
-	//TODO: Adaptar esto.
-	// /**
-	//  * Writes a filled-out template to the vault, optionally replaces the active editor selection,
-	//  * and opens the newly created file according to the provided options.
-	//  *
-	//  * Returns a discriminated result object — never throws for expected IO failures.
-	//  * - `{ ok: true, fileCreated, filePath?, replacedSelection, openedFile }` on success.
-	//  * - `{ ok: false, code, message, cause? }` when file creation or file opening fails.
-	//  *   `code` is `"CREATE_FILE_FAILED"` or `"OPEN_FILE_FAILED"`.
-	//  *
-	//  * Unexpected errors (e.g. programming bugs) are still thrown and should be caught by the caller.
-	//  *
-	//  * @param result - The filled-out template data: note content, filename, folder and replacement text.
-	//  * @param options - Controls whether to create a file, replace the selection, and how to open the file.
-	//  * @returns A discriminated union — check `ok` before accessing success or error fields.
-	//  */
-	// async insertFromTemplate(
-	// 	//! result: TemplateResult, use [extendedSettings] instead
-	// 	//! options: ReplacementOptions, use [extendedSettings] instead
-	// 	targetFile: TFile,
-	// 	settings: extendedSettings
-	// ): Promise<
-	// 	| {
-	// 		ok: true;
-	// 		fileCreated: boolean;
-	// 		filePath?: string;
-	// 		replacedSelection: boolean;
-	// 		openedFile: boolean;
-	// 	  }
-	// 	| {
-	// 		ok: false;
-	// 		code: "CREATE_FILE_FAILED" | "OPEN_FILE_FAILED";
-	// 		message: string;
-	// 		cause?: unknown;
-	// 	  }
-	// > {
-	// 	const vault = this.app.vault;
-
-	// 	// First try to make the file
-	// 	console.debug("Making file");
-	// 	let newFile: TFile | null = null;
-	// 	let openedFile = false;
-	// 	// This is unnecesary
-	// 	// if (options.shouldCreateOpen !== "none") {
-	// 	// 	try {
-	// 	// 		await this.createFolderIfNeeded(result.folder);
-	// 	// 		const fullPath = result.folder + "/" + result.filename + ".md";
-	// 	// 		newFile = await vault.create(fullPath, result.note);
-	// 	// 	} catch (error) {
-	// 	// 		console.debug("Error writing template", error);
-	// 	// 		return {
-	// 	// 			ok: false,
-	// 	// 			code: "CREATE_FILE_FAILED",
-	// 	// 			message: `Couldn't create file '${result.filename}': ${error instanceof Error ? error.message : String(error)}`,
-	// 	// 			cause: error,
-	// 	// 		};
-	// 	// 	}
-	// 	// }
-
-	// 	// Then see if we replace text in the editor
-	// 	// if (settings.selectionReplacementPolicy)
-	// 	// 	this.replaceCurrentSelection(settings.replacementText, options.editor);
-
-	// 	// Then see if we should open the new file
-	// 	// if (newFile) {
-	// 	// 	console.debug("Opening");
-	// 	// 	let leaf: WorkspaceLeaf | null = null;
-	// 	// 	if (options.shouldCreateOpen === "open")
-	// 	// 		leaf = this.app.workspace.getLeaf(false);
-	// 	// 	else if (options.shouldCreateOpen === "open-pane")
-	// 	// 		leaf = this.app.workspace.getLeaf("split");
-	// 	// 	else if (options.shouldCreateOpen === "open-tab")
-	// 	// 		leaf = this.app.workspace.getLeaf("tab");
-	// 	// 	if (leaf) {
-	// 	// 		try {
-	// 	// 			await leaf.openFile(newFile);
-	// 	// 			openedFile = true;
-	// 	// 		} catch (error) {
-	// 	// 			console.debug("Error opening created file", error);
-	// 	// 			return {
-	// 	// 				ok: false,
-	// 	// 				code: "OPEN_FILE_FAILED",
-	// 	// 				message:
-	// 	// 					"Created file '" + result.filename + "' but couldn't open it.",
-	// 	// 				cause: error,
-	// 	// 			};
-	// 	// 		}
-	// 	// 	}
-	// 	// }
-
-	// 	// return {
-	// 	// 	ok: true,
-	// 	// 	fileCreated: newFile !== null,
-	// 	// 	filePath: newFile?.path,
-	// 	// 	replacedSelection: options.willReplaceSelection,
-	// 	// 	openedFile: openedFile,
-	// 	// };
-	// }
 
 	/**
 	 * Checks whether the provided vault path currently resolves to an existing folder.
@@ -318,8 +152,8 @@ export default class FT_Plugin extends Plugin {
 			return;
 		}
 
-		if (!this.checkIfFolderExists(normalizedFolder)){
-			await this.folderCreateModal.createDirectory(normalizedFolder)
+		if (!this.checkIfFolderExists(normalizedFolder)) {
+			await this.folderCreateModal.createDirectory(normalizedFolder);
 			return;
 		}
 
@@ -353,12 +187,12 @@ export default class FT_Plugin extends Plugin {
 		}
 	}
 
-	openFile(file: TFile, mode: 'current' | 'tab' | 'split'){
-		if(mode === 'current'){
+	openFile(file: TFile, mode: "current" | "tab" | "split") {
+		if (mode === "current") {
 			this.app.workspace.getLeaf(false).openFile(file);
 			return;
 		}
-		
+
 		this.app.workspace.getLeaf(mode).openFile(file);
 	}
 
@@ -418,9 +252,7 @@ export default class FT_Plugin extends Plugin {
 			combinedDefaultSettings.temptativeOutputFolder = "";
 		}
 
-		console.debug(
-			`Default config is loaded:\n`, combinedDefaultSettings
-		);
+		console.debug(`Default config is loaded:\n`, combinedDefaultSettings);
 
 		return combinedDefaultSettings;
 	}

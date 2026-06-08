@@ -19,4 +19,4 @@ export { FT_FolderCreateModal } from "./FolderCreateModal.js";
 export { FT_SettingTab } from "./SettingsPane.js";
 
 //Reactive
-export { Reactive } from "./Signals.js"
+export { Reactive } from "./Signals.js";
