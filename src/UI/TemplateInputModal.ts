@@ -320,7 +320,6 @@ export class FT_TemplateInputModal extends Modal {
 			if(fieldData){
 				fieldData.value = newValue;
 				this._fields.set(id,fieldData)
-				console.log(`Updating ${id} with new value: ${newValue}`);
 			}
 			this._status.setNeutral();
 
@@ -555,7 +554,7 @@ export class FT_TemplateInputModal extends Modal {
 		if(options.selectionReplacementTemplates){
 			options.textReplacement_Pattern = options.selectionReplacementTemplates;
 		}
-		console.log(options.textReplacement_Pattern); // * Uses template definition if aviable.
+		// console.log(options.textReplacement_Pattern); // * Uses template definition if aviable.
 
 		// Luego crear el TextComponent usando ese div
 		const replacementText = new TextComponent(replacementColumn)
@@ -645,7 +644,6 @@ export class FT_TemplateInputModal extends Modal {
 
 	addSubmitSection(): this {
 		const finalSettings = this._settings;
-		console.log(this._settings);
 		if (!finalSettings) return this;
 
 		this.addSeparator();
@@ -685,9 +683,8 @@ export class FT_TemplateInputModal extends Modal {
 
 				const tags = this._fields.get("tags");
 				if(tags){
-					console.log("tags", tags);
 					const outputTagList = parseCsvStringList(tags.value);
-					console.log("output	Tag List", outputTagList);
+					console.debug("Input Field tags", tags, " Converting to:", outputTagList);
 					finalSettings.textReplacement_data["tags"] = outputTagList;
 				}
 
@@ -744,8 +741,7 @@ export class FT_TemplateInputModal extends Modal {
 
 			switch (inputType) {
 				case "text": {
-					// console.log(`Modifing ${name} with default ${initial}`);
-					console.log(`Creando un text element para ${field.id}`);
+					// console.debug(`Creating a text element for ${field.id}, with default value: "${field.default}"\n`, field);
 					const updateValue = (newValue: string) => {
 						// console.debug(`currentValue: ${textComponent.getValue()}`);
 						UpdateFieldValue(name, newValue, newValue)

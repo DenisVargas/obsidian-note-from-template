@@ -57,7 +57,7 @@ export class FT_FolderCreateModal extends Modal {
 		
 		const accept = async () => {
 			try {
-				console.log(`CREO EL PATH: ${this.folderPath}`)
+				console.debug(`Folder: ${this.folderPath} will be created`);
 				await this.app.vault.createFolder(this.folderPath!);
 				this.settle(true);
 			} catch (error) {

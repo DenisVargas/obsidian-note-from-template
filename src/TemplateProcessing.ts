@@ -115,10 +115,8 @@ export class FT_TemplateProcessor {
 			...globalSettings,
 			fields: new Map<string, TemplateField>(),
 		};
-		console.debug(`Global settings Input Field List ${resolved.rawInputFieldList}`); //* OK
 
 		//We should be able to override global settings in a Template per Template basis.
-
 		if (typeof rawSettings["template-output"] === "string") {
 			if (containsFilenameToken(rawSettings["template-output"])) {
 				console.warn(
@@ -162,7 +160,6 @@ export class FT_TemplateProcessor {
 		}
 
 		// Template-replacement maps to default Replacement string, currently "[[{{title}}]]"
-		console.debug(rawSettings["template-replacement"])
 		if (typeof rawSettings["template-replacement"] === "string"){
 			resolved.selectionReplacementTemplates = rawSettings["template-replacement"];
 		}
@@ -244,7 +241,6 @@ export class FT_TemplateProcessor {
 			let vaultFileName = vaultFile.basename; //By Default we use the same name as the file.
 			if(rawSettings["template-command-name"]){
 				vaultFileName = rawSettings["template-command-name"];
-				console.log("Command Registered as:"+ rawSettings["template-command-name"]);
 			}
 
 			/* -------------------------- Template Cache Entry -------------------------- */
@@ -298,6 +294,7 @@ export class FT_TemplateProcessor {
 					}
 				},
 			});
+			console.info(`Command Registered: "FromTemplate:${meta.id}"\nfor file "${vaultFile.path}"`);
 		}
 
 		this._templateCache = nextCache;
@@ -436,7 +433,7 @@ export class FT_TemplateProcessor {
 					break;
 			}
 		} catch (error) {
-			console.debug( `Couldn't execute template '${templateId}': ${error instanceof Error ? error.message : String(error)}` );
+			console.warn( `Couldn't execute template '${templateId}': ${error instanceof Error ? error.message : String(error)}` );
 		}
 	}
 
@@ -611,12 +608,11 @@ export class FT_TemplateProcessor {
 				//Filter template configs from content
 				if (TEMPLATE_FIELDS.contains(key)) {
 					templateConfigs[key] = fullFrontMatter[key];
-					console.debug("TEMPLATE CONFIG:\n", key, "\n", templateConfigs[key]);
+					// console.debug("TEMPLATE CONFIG:\n", key, "\n", templateConfigs[key]);
 				}
 				else frontmatter[key] = fullFrontMatter[key];
 			}
-			console.debug("Template Configs\n", templateConfigs);
-			console.debug("Template FrontMatter:\n", frontmatter);
+			console.debug(`Template Loaded for File:${vaultFile.path}\n`,"Configs:\n", templateConfigs, "FrontMatter:\n", frontmatter);
 
 			return Ok({
 				body,

@@ -138,12 +138,12 @@ export function normalizeSettingsOutputFolder(input: string | undefined): string
 	return normalized.endsWith("/") ? normalized : `${normalized}/`;
 }
 
-//Utility for debugging
-export function printObjectProperties(obj: Record<string, unknown>): string {
-	//If it gets a null or undefined object should not throw error.
-	if (!obj) return "";
+// //Utility for debugging
+// export function printObjectProperties(obj: Record<string, unknown>): string {
+// 	//If it gets a null or undefined object should not throw error.
+// 	if (!obj) return "";
 
-	return Object.entries(obj)
-		.map(([key, value]) => `${key}: ${String(value)}`)
-		.join("\n");
-}
+// 	return Object.entries(obj)
+// 		.map(([key, value]) => `${key}: ${String(value)}`)
+// 		.join("\n");
+// }

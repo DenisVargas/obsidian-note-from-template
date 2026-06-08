@@ -25,8 +25,7 @@ import { FT_TemplateProcessor } from "./TemplateProcessing.js";
 import {
 	containsFilenameToken,
 	isUnsafeVaultFolderPath,
-	normalizeVaultFolderPath,
-	printObjectProperties,
+	normalizeVaultFolderPath
 } from "./utils.js";
 
 export default class FT_Plugin extends Plugin {
@@ -420,7 +419,7 @@ export default class FT_Plugin extends Plugin {
 		}
 
 		console.debug(
-			`Default config is loaded:\n\n${printObjectProperties(combinedDefaultSettings)}\n`,
+			`Default config is loaded:\n`, combinedDefaultSettings
 		);
 
 		return combinedDefaultSettings;
